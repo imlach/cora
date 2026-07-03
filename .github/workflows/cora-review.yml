@@ -85,8 +85,10 @@ jobs:
         env:
           BROKER_URL: ${{ secrets.CORA_TOKEN_BROKER_URL }}
         run: |
-          oidc=$(curl -sfS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN"             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=imla-token-broker" | jq -r .value)
-          token=$(curl -sfS -m 10 -X POST -H "Authorization: Bearer $oidc" "$BROKER_URL" | jq -r .token)
+          set -o pipefail
+          oidc=$(curl -sfS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN"             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=imla-token-broker" | jq -re .value)
+          token=$(curl -sfS -m 10 -X POST -H "Authorization: Bearer $oidc" "$BROKER_URL" | jq -re .token)
+          [ -n "$token" ] || { echo "::warning::broker returned empty token"; exit 1; }
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
 
