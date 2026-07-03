@@ -49,6 +49,7 @@ permissions:
   contents: read
   pull-requests: write   # post / edit the review comment
   checks: write          # POST/PATCH the verdict check-run
+  id-token: write        # OIDC token for the App-token broker exchange
 
 jobs:
   review:
@@ -67,20 +68,27 @@ jobs:
     # 20min covers T0 (360s) + T1 (600s) + headroom; review-large doubles
     # T1 to 1200s, so the outer bound moves to 30 in lockstep.
     timeout-minutes: ${{ contains(github.event.pull_request.labels.*.name, 'review-large') && 30 || 20 }}
-    env:
-      CORA_APP_ID: ${{ secrets.CORA_APP_ID }}
-      CORA_APP_PRIVATE_KEY: ${{ secrets.CORA_APP_PRIVATE_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Mint cora App token
+      - name: Mint cora App token via broker
+        # OIDC → in-cluster github-token-broker exchange: the job trades
+        # its Actions identity token for a ≤1h installation token scoped
+        # by the broker's trust policy. No App private key in this repo's
+        # secrets. The broker URL is a secret only because it's an
+        # internal hostname; soft-fails to GITHUB_TOKEN when unset or
+        # unreachable.
         id: cora-app-token
-        if: ${{ env.CORA_APP_ID != '' && env.CORA_APP_PRIVATE_KEY != '' }}
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ env.CORA_APP_ID }}
-          private-key: ${{ env.CORA_APP_PRIVATE_KEY }}
+        if: ${{ env.BROKER_URL != '' }}
+        continue-on-error: true
+        env:
+          BROKER_URL: ${{ secrets.CORA_TOKEN_BROKER_URL }}
+        run: |
+          oidc=$(curl -sfS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN"             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=imla-token-broker" | jq -r .value)
+          token=$(curl -sfS -m 10 -X POST -H "Authorization: Bearer $oidc" "$BROKER_URL" | jq -r .token)
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
 
       - name: Resolve agent venv
         # Prefer the baked /opt/agent-venv from the self-hosted runner image
