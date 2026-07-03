@@ -185,6 +185,23 @@ def resolve_run_usage(result):
     return usage
 
 
+def model_name_from_result(result) -> str | None:
+    """Best-effort `resolved_model` fallback for provider paths that
+    never emit `x-litellm-*` headers (the direct Anthropic/Bedrock SDK
+    paths have no gateway in front of them to set any). Reads
+    pydantic-ai's `ModelResponse.model_name` off the run's final
+    response — the provider's own answer to "what model actually
+    served this" — so the check-run "Backend" chip keeps working
+    without a gateway. Returns `None` on any shape mismatch (older
+    pydantic-ai, a test double, ...) so callers can chain it after
+    `resolved_model_from(captured)` without an extra guard."""
+    try:
+        response = getattr(result, "response", None)
+        return getattr(response, "model_name", None) or None
+    except Exception:  # noqa: BLE001 — diagnostic-only, never fatal
+        return None
+
+
 def usage_tokens(usage, *names: str) -> int:
     """First present, non-zero token counter from `usage`, trying `names`
     in order. pydantic-ai renamed `request_tokens`/`response_tokens` →

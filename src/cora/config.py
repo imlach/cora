@@ -48,6 +48,13 @@ class ReviewerConfig:
     llm_base_url: str = _c.DEFAULT_LITELLM_BASE
     llm_api_key: str | None = None
     model: str = _c.DEFAULT_MODEL
+    # Which dialect `make_review_agent` speaks. Default
+    # `"openai-compatible"` is byte-identical to every existing
+    # deployment; `"anthropic"` / `"bedrock"` are gateway-less direct-SDK
+    # paths (see `core.config.SUPPORTED_LLM_PROVIDERS`). `llm_base_url`
+    # is ignored on those paths unless explicitly pointed away from the
+    # `DEFAULT_LITELLM_BASE` placeholder (see `cora.core.agent`).
+    llm_provider: str = _c.DEFAULT_LLM_PROVIDER
 
     # ── MCP attachments (optional; deep mode) ────────────────────────
     mcp_url: str = _c.DEFAULT_MCP_URL
@@ -286,11 +293,29 @@ class ReviewerConfig:
         except ValueError:
             t1_max_iterations = _c.DEFAULT_T1_MAX_ITERATIONS
 
+        # Direct-SDK provider seam. An unknown value fails loudly (like
+        # the escalation-triggers CSV below) rather than silently
+        # falling back to the gateway path.
+        llm_provider = getalias("LLM_PROVIDER", _c.DEFAULT_LLM_PROVIDER)
+        if llm_provider not in _c.SUPPORTED_LLM_PROVIDERS:
+            raise ValueError(
+                f"unknown LLM_PROVIDER: {llm_provider!r} "
+                f"(supported: {sorted(_c.SUPPORTED_LLM_PROVIDERS)})"
+            )
+        # `llm_api_key` also accepts `ANTHROPIC_API_KEY` on the direct
+        # Anthropic path so `LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=…`
+        # runs with no gateway secret at all. Bedrock needs no API key
+        # (AWS credential chain) so it isn't threaded here.
+        llm_api_key = get("LLM_GATEWAY_KEY")
+        if llm_api_key is None and llm_provider == "anthropic":
+            llm_api_key = get("ANTHROPIC_API_KEY")
+
         cfg = cls(
             repo=get("GH_REPO") or get("GITHUB_REPOSITORY") or "",
             pr_number=get("PR_NUMBER") or "",
             llm_base_url=get("LITELLM_BASE_URL", _c.DEFAULT_LITELLM_BASE),
-            llm_api_key=get("LLM_GATEWAY_KEY"),
+            llm_api_key=llm_api_key,
+            llm_provider=llm_provider,
             model=get("REVIEW_MODEL", _c.DEFAULT_MODEL),
             mcp_url=get("MCP_URL", _c.DEFAULT_MCP_URL),
             mcp_token=get("MCP_TOKEN"),

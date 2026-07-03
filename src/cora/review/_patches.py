@@ -214,7 +214,7 @@ async def dispatch_patches(run: ReviewRun) -> None:  # noqa: PLR0915
                         esc_t2_term,
                         _esc_t2_tools,
                     ) = await call_t2_alt_reviewer(
-                        endpoint_base_url=f"{run.base_url.rstrip('/')}/v1",
+                        endpoint_base_url=run.endpoint_base_url,
                         llm_gateway_key=run.api_key,
                         t2_model_alias=t2_model_alias,
                         system_prompt=run.system_prompt,

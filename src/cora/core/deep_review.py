@@ -31,8 +31,10 @@ import asyncio
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
+from cora.core import config as _c
 from cora.core.budget import (
     T0_COLD_START_ALLOWANCE_S,
+    model_name_from_result,
     resolve_run_usage,
     usage_tokens,
 )
@@ -177,8 +179,6 @@ def _loaded_tool_names(
     "unused" denominator tied to the successfully opened server
     classes so it remains useful as a tool-loading signal.
     """
-    from cora.core import config as _c
-
     read_set = set(_c.READ_TOOLS if read_tools is None else read_tools)
     local_set = set(
         _c.LOCAL_REPO_TOOLS if local_repo_tools is None else local_repo_tools
@@ -298,10 +298,10 @@ async def deep_review_call(
         falling back to the `agent-loop-errored` soft-fail. Flag-off and
         non-spiral errors follow the pre-feature path unchanged.
     """
-    from pydantic_ai import ModelSettings, UsageLimits
+    from pydantic_ai import UsageLimits
     from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 
-    from cora.core.agent import AgentConfig, Deps, make_review_agent
+    from cora.core.agent import AgentConfig, Deps, build_model_settings, make_review_agent
 
     # Pre-probe the required MCP server. Failure here returns the
     # distinct `mcp-connect-failed` terminated_reason so the caller
@@ -347,6 +347,7 @@ async def deep_review_call(
         api_key=llm_gateway_key,
         model_alias=model_alias,
         system_prompt=system_prompt,
+        provider=cfg.llm_provider if cfg is not None else _c.DEFAULT_LLM_PROVIDER,
         mcp_servers=mcp_servers,
         mcp_allowed_tools=mcp_allowed_for_filter,
         local_tools=_make_pydantic_ai_local_tools(
@@ -413,8 +414,6 @@ async def deep_review_call(
 
     # Per-call output budget — must fit the model's `<think>` trace AND the
     # turn's text/tool-call. See `_c.DEEP_MAX_OUTPUT_TOKENS`.
-    from cora.core import config as _c
-
     deep_max_tokens = (
         cfg.deep_max_output_tokens if cfg is not None else _c.DEEP_MAX_OUTPUT_TOKENS
     )
@@ -445,23 +444,23 @@ async def deep_review_call(
             async with agent.iter(
                 initial_user_prompt,
                 deps=deps,
-                model_settings=ModelSettings(
-                    # Per-call output budget — must absorb the model's
-                    # `<think>...</think>` reasoning block AND leave room for
-                    # the turn's text / tool-call. Pydantic-AI raises
-                    # `UnexpectedModelBehavior` when a turn finishes with
-                    # `finish_reason='length'` and only thinking parts came
-                    # back (`_agent_graph.py` L1104). This cap has climbed
-                    # 8k → 16k → `DEEP_MAX_OUTPUT_TOKENS` as the review model's
-                    # reasoning grew — the review reasoning model blew the whole
-                    # 16k on turn 1 of a substantive PR.
-                    # Config-threaded; T1 (continuation.py) uses the same cap.
-                    # Fits the review chain's typical context windows
-                    # (e.g. 80k T0, 256k T1).
+                # Per-call output budget — must absorb the model's
+                # `<think>...</think>` reasoning block AND leave room for
+                # the turn's text / tool-call. Pydantic-AI raises
+                # `UnexpectedModelBehavior` when a turn finishes with
+                # `finish_reason='length'` and only thinking parts came
+                # back (`_agent_graph.py` L1104). This cap has climbed
+                # 8k → 16k → `DEEP_MAX_OUTPUT_TOKENS` as the review model's
+                # reasoning grew — the review reasoning model blew the whole
+                # 16k on turn 1 of a substantive PR.
+                # Config-threaded; T1 (continuation.py) uses the same cap.
+                # Fits the review chain's typical context windows
+                # (e.g. 80k T0, 256k T1).
+                model_settings=build_model_settings(
+                    cfg,
                     max_tokens=deep_max_tokens,
-                    temperature=0.2,
-                    timeout=timeout_s,
-                    **_thinking_extra_body(
+                    timeout_s=timeout_s,
+                    extra=_thinking_extra_body(
                         cfg.enable_thinking if cfg is not None else None
                     ),
                 ),
@@ -686,11 +685,11 @@ async def deep_review_call(
                     leadin,
                     message_history=spiral_messages,
                     deps=deps,
-                    model_settings=ModelSettings(
+                    model_settings=build_model_settings(
+                        cfg,
                         max_tokens=cfg.spiral_recovery_max_output_tokens,
-                        temperature=0.2,
-                        timeout=timeout_s,
-                        **_thinking_extra_body(
+                        timeout_s=timeout_s,
+                        extra=_thinking_extra_body(
                             cfg.enable_thinking if cfg is not None else None
                         ),
                     ),
@@ -742,7 +741,9 @@ async def deep_review_call(
     captured = drain_captured_headers()
     budget.record_litellm_headers(captured)
     budget.set_resolved_model(
-        resolved_model_from(captured) or "unknown (no x-litellm-* headers)"
+        resolved_model_from(captured)
+        or model_name_from_result(result)
+        or "unknown (no x-litellm-* headers)"
     )
 
     body = result.output if isinstance(result.output, str) else str(result.output)

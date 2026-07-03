@@ -12,7 +12,12 @@ opt-in per call site if it ever needs to harden a specific tier.
 Provider-agnostic by design: the reviewer talks to whatever
 OpenAI-compatible endpoint sits behind `endpoint_base_url`. The
 reference deployment fronts its models with LiteLLM; the application
-code doesn't know or care.
+code doesn't know or care. `AgentConfig.provider` widens that seam to
+two gateway-less direct-SDK dialects (`"anthropic"`, `"bedrock"`) for
+an adopter with only a cloud API key/credentials — see
+`_build_anthropic_model` / `_build_bedrock_model` and
+`core.config.SUPPORTED_LLM_PROVIDERS`. The default `"openai-compatible"`
+path is untouched byte-for-byte.
 """
 
 from __future__ import annotations
@@ -20,8 +25,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
+from cora.core import config as _c
+
 if TYPE_CHECKING:
     from cora.config import ReviewerConfig
+    from pydantic_ai.settings import ModelSettings
 
 
 def _default_reviewer_config() -> "ReviewerConfig":
@@ -88,6 +96,9 @@ class AgentConfig:
     # OpenAI-compatible endpoint (a LiteLLM gateway, vLLM-direct,
     # OpenRouter — anything OpenAI-compatible, per deployment).
     # Reviewer code stays generic via the generic `OpenAIProvider`.
+    # Ignored on the `"anthropic"` / `"bedrock"` provider paths unless
+    # explicitly pointed away from the localhost placeholder — see
+    # `_build_anthropic_model`.
     endpoint_base_url: str
     api_key: str
 
@@ -101,6 +112,11 @@ class AgentConfig:
     # caller. Free-form-output-shaped so the existing downstream
     # leak detector + verdict parser consume the response unchanged.
     system_prompt: str
+
+    # Which dialect to speak — mirrors `ReviewerConfig.llm_provider` /
+    # `core.config.SUPPORTED_LLM_PROVIDERS`. Default keeps the
+    # OpenAI-compatible path unchanged for every existing deployment.
+    provider: str = _c.DEFAULT_LLM_PROVIDER
 
     # MCP servers — list of `(url, auth_headers)` tuples. Empty in
     # quick mode. Populated in deep mode with the three sessions
@@ -139,6 +155,134 @@ class AgentConfig:
     retries: int = 1
 
 
+def _build_openai_compatible_model(config: AgentConfig):
+    """The stock, default path — byte-identical to cora's pre-seam
+    behaviour. Talks OpenAI Chat Completions to whatever
+    `config.endpoint_base_url` points at (a LiteLLM gateway,
+    vLLM-direct, OpenRouter, ...)."""
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.providers.openai import OpenAIProvider
+
+    from cora.core.litellm_capture import build_capture_client
+
+    # Custom httpx client carries a response event hook that drains
+    # `x-litellm-*` headers into a ContextVar so the call site can
+    # populate `Budget.resolved_model` / `litellm_headers` after
+    # `agent.run()` — the openai SDK otherwise hides them behind
+    # pydantic-ai's Agent wrapper. The client is owned by the
+    # underlying AsyncOpenAI; not explicitly closed because the
+    # per-PR process exits after the review lands.
+    openai_provider = OpenAIProvider(
+        base_url=config.endpoint_base_url,
+        api_key=config.api_key,
+        http_client=build_capture_client(),
+    )
+    return OpenAIChatModel(config.model_alias, provider=openai_provider)
+
+
+def _provider_base_url_override(config: AgentConfig) -> str | None:
+    """Optional base-url override for the direct-SDK provider paths.
+
+    `config.endpoint_base_url` always carries a value (the OpenAI-
+    compatible path needs one structurally), so a bare gateway-less
+    `LLM_PROVIDER=anthropic` run — no `LITELLM_BASE_URL` set — still
+    arrives here holding the unmodified `DEFAULT_LITELLM_BASE`
+    placeholder. Forwarding that would point the direct SDK at a local
+    gateway that doesn't exist for this path, so it's treated as "no
+    override" — the SDK falls back to its own default endpoint. An
+    adopter who explicitly points `LITELLM_BASE_URL` somewhere else
+    (an Anthropic-compatible proxy, a regional endpoint, ...) gets it
+    passed through untouched."""
+    base_url = (config.endpoint_base_url or "").strip()
+    if not base_url or base_url == _c.DEFAULT_LITELLM_BASE:
+        return None
+    return base_url
+
+
+def _build_anthropic_model(config: AgentConfig):
+    """Direct Anthropic SDK path — no gateway in between.
+
+    Requires the optional `cora[anthropic]` extra
+    (`pydantic-ai-slim[anthropic]`, which pulls in the `anthropic`
+    SDK); the import is lazy so the default openai-compatible path
+    never needs it installed."""
+    try:
+        from pydantic_ai.models.anthropic import AnthropicModel
+        from pydantic_ai.providers.anthropic import AnthropicProvider
+    except ImportError as exc:
+        raise ImportError(
+            "LLM_PROVIDER=anthropic requires the 'anthropic' extra: "
+            "pip install 'cora[anthropic]'"
+        ) from exc
+
+    anthropic_provider = AnthropicProvider(
+        api_key=config.api_key or None,
+        base_url=_provider_base_url_override(config),
+    )
+    return AnthropicModel(config.model_alias, provider=anthropic_provider)
+
+
+def _build_bedrock_model(config: AgentConfig):
+    """Direct Amazon Bedrock SDK path — AWS credential chain, no
+    gateway in between.
+
+    Requires the optional `cora[bedrock]` extra
+    (`pydantic-ai-slim[bedrock]`, which pulls in `boto3`); the import
+    is lazy so the default openai-compatible path never needs it
+    installed. Bedrock model IDs carry an `anthropic.` prefix — a bare
+    alias like `claude-opus-4-8` (the shape every other provider
+    path/dashboard uses) is prefixed automatically; an already-prefixed
+    `model_alias` is left alone."""
+    try:
+        from pydantic_ai.models.bedrock import BedrockConverseModel
+    except ImportError as exc:
+        raise ImportError(
+            "LLM_PROVIDER=bedrock requires the 'bedrock' extra: "
+            "pip install 'cora[bedrock]'"
+        ) from exc
+
+    model_name = config.model_alias
+    if not model_name.startswith("anthropic."):
+        model_name = f"anthropic.{model_name}"
+    return BedrockConverseModel(model_name)
+
+
+def build_model_settings(
+    cfg: "ReviewerConfig | None",
+    *,
+    max_tokens: int,
+    timeout_s: float,
+    extra: dict[str, Any] | None = None,
+) -> "ModelSettings":
+    """Build the per-call `ModelSettings` for the configured provider.
+
+    On the default `"openai-compatible"` path this is byte-identical
+    to what every call site constructed before the provider seam:
+    `max_tokens` + a fixed `temperature=0.2` + `timeout`, plus whatever
+    `extra` the caller threads (deep mode's `_thinking_extra_body`
+    vLLM `extra_body` toggle).
+
+    On the direct `"anthropic"` / `"bedrock"` SDK paths, `temperature`
+    and `extra` are both dropped: current Claude models reject
+    non-default sampling parameters with a 400, the vLLM
+    `chat_template_kwargs.enable_thinking` shape is a no-op there
+    (cloud Claude's adaptive-thinking defaults are already correct),
+    and explicit thinking configuration isn't sent either — same
+    reasoning as the dropped sampling params.
+    """
+    from pydantic_ai import ModelSettings
+
+    provider = cfg.llm_provider if cfg is not None else _c.DEFAULT_LLM_PROVIDER
+    if provider == "openai-compatible":
+        return ModelSettings(
+            max_tokens=max_tokens,
+            temperature=0.2,
+            timeout=timeout_s,
+            **(extra or {}),
+        )
+    return ModelSettings(max_tokens=max_tokens, timeout=timeout_s)
+
+
 def make_review_agent(config: AgentConfig, deps_type: type = Deps):
     """Build a Pydantic-AI Agent from the supplied config.
 
@@ -163,29 +307,32 @@ def make_review_agent(config: AgentConfig, deps_type: type = Deps):
     schema. Local tools are listed before MCP toolsets, so on a
     name collision local wins (deep mode uses this so the PR-aware
     `grep_repo` / `git_show` shadow the MCP server's main-mirror copies).
+
+    `config.provider` selects the dialect. Default
+    `"openai-compatible"` is this exact path, unchanged. `"anthropic"` /
+    `"bedrock"` build the model through pydantic-ai's direct SDK
+    integrations instead — see `_build_anthropic_model` /
+    `_build_bedrock_model`. Both require their own optional extra
+    (`cora[anthropic]` / `cora[bedrock]`); the import is lazy so the
+    default path never needs them installed.
     """
     # Local imports keep the heavy framework dep off the module-load
     # path for environments where `pydantic-ai` isn't installed yet
     # (the smoke test handles that case with `pytest.importorskip`).
     from pydantic_ai import Agent
-    from pydantic_ai.models.openai import OpenAIChatModel
-    from pydantic_ai.providers.openai import OpenAIProvider
 
-    from cora.core.litellm_capture import build_capture_client
-
-    # Custom httpx client carries a response event hook that drains
-    # `x-litellm-*` headers into a ContextVar so the call site can
-    # populate `Budget.resolved_model` / `litellm_headers` after
-    # `agent.run()` — the openai SDK otherwise hides them behind
-    # pydantic-ai's Agent wrapper. The client is owned by the
-    # underlying AsyncOpenAI; not explicitly closed because the
-    # per-PR process exits after the review lands.
-    provider = OpenAIProvider(
-        base_url=config.endpoint_base_url,
-        api_key=config.api_key,
-        http_client=build_capture_client(),
-    )
-    model = OpenAIChatModel(config.model_alias, provider=provider)
+    provider = config.provider or _c.DEFAULT_LLM_PROVIDER
+    if provider == "openai-compatible":
+        model = _build_openai_compatible_model(config)
+    elif provider == "anthropic":
+        model = _build_anthropic_model(config)
+    elif provider == "bedrock":
+        model = _build_bedrock_model(config)
+    else:
+        raise ValueError(
+            f"unknown AgentConfig.provider: {provider!r} "
+            f"(supported: {sorted(_c.SUPPORTED_LLM_PROVIDERS)})"
+        )
 
     toolsets: list[Any] = []
     if config.mcp_servers:

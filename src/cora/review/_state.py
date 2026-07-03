@@ -172,3 +172,22 @@ class ReviewRun:
 
     def eval_dump(self, filename: str, content: str) -> None:
         _eval_dump(self.cfg, filename, content)
+
+    @property
+    def endpoint_base_url(self) -> str:
+        """`base_url` shaped for the configured LLM provider.
+
+        The OpenAI-compatible path (the default) always wants the
+        `/v1`-suffixed base the `openai` SDK expects — unchanged
+        behaviour. The direct Anthropic/Bedrock SDK paths use their own
+        default endpoints (api.anthropic.com / the AWS credential
+        chain's region) unless `llm_base_url` is explicitly pointed
+        elsewhere, so neither the `/v1` suffix nor the
+        `DEFAULT_LITELLM_BASE` localhost placeholder should be
+        forwarded as an override. See `cora.core.agent` for how the
+        provider branch consumes this."""
+        if self.cfg.llm_provider == "openai-compatible":
+            return f"{self.base_url.rstrip('/')}/v1"
+        from cora.core import config as _c
+
+        return self.base_url if self.base_url != _c.DEFAULT_LITELLM_BASE else ""

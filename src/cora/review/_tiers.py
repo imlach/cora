@@ -192,7 +192,7 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
 
         run.tiers_run.append(model)
         run.final_body, run.terminated_reason = await quick_review_call(
-            endpoint_base_url=f"{run.base_url.rstrip('/')}/v1",
+            endpoint_base_url=run.endpoint_base_url,
             llm_gateway_key=run.api_key,
             model_alias=model,
             system_prompt=run.system_prompt,
@@ -269,7 +269,7 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
             run.tools_available,
             t0_messages,
         ) = await deep_review_call(
-            endpoint_base_url=f"{run.base_url.rstrip('/')}/v1",
+            endpoint_base_url=run.endpoint_base_url,
             llm_gateway_key=run.api_key,
             model_alias=model,
             system_prompt=run.system_prompt,
@@ -403,7 +403,7 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
             tag=tag,
             terminated_reason=run.terminated_reason,
             extra={
-                "endpoint_base_url": f"{run.base_url.rstrip('/')}/v1",
+                "endpoint_base_url": run.endpoint_base_url,
                 "llm_gateway_key": run.api_key,
                 "system_prompt": run.system_prompt,
                 "budget": budget,
@@ -544,7 +544,7 @@ async def second_opinion_dispatch(run: ReviewRun) -> None:
         return
     run.second_opinion_result = await run.second_opinion.dispatch(
         cfg=run.cfg,
-        endpoint_base_url=f"{run.base_url.rstrip('/')}/v1",
+        endpoint_base_url=run.endpoint_base_url,
         api_key=run.api_key,
         system_prompt=run.system_prompt,
         initial_user_prompt=run.initial_user_prompt,

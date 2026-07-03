@@ -8,6 +8,21 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Added
+- Direct cloud-provider seam — `LLM_PROVIDER` (`ReviewerConfig.llm_provider`,
+  default `openai-compatible`, byte-identical to today's behaviour) selects
+  `anthropic` or `bedrock` to run cora with no LiteLLM/OpenAI-compatible
+  gateway in between: an Anthropic API key (`ANTHROPIC_API_KEY`, or
+  `LLM_GATEWAY_KEY` which takes precedence) or AWS credentials (Bedrock's
+  standard credential chain) are all that's needed. Both paths drop
+  non-default sampling parameters and the vLLM `enable_thinking` extra_body
+  toggle (current Claude models reject/no-op them) and fall back to the
+  provider's own response `model` field for the check-run "Backend" chip
+  when no `x-litellm-*` headers are present. New optional extras
+  `cora[anthropic]` / `cora[bedrock]`; both imports are lazy, so the default
+  path never requires them installed. See `docs/configuration.md` →
+  "Running against a cloud provider".
+
 ## [0.1.0] - 2026-07-03
 
 First public release. cora's development history predates this

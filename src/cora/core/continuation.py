@@ -40,7 +40,7 @@ from cora.core.deep_review import (
     _make_pydantic_ai_local_tools,
 )
 from cora.core import config as _c
-from cora.core.budget import resolve_run_usage, usage_tokens
+from cora.core.budget import model_name_from_result, resolve_run_usage, usage_tokens
 from cora.core.mcp_probe import probe_mcp_server as _probe_mcp_server
 
 
@@ -226,10 +226,10 @@ async def continue_on_t1(
     is unlikely if T0 succeeded, but still returns the distinct
     `mcp-connect-failed` reason for finalize-path consistency.
     """
-    from pydantic_ai import ModelSettings, UsageLimits
+    from pydantic_ai import UsageLimits
     from pydantic_ai.exceptions import UsageLimitExceeded
 
-    from cora.core.agent import AgentConfig, Deps, make_review_agent
+    from cora.core.agent import AgentConfig, Deps, build_model_settings, make_review_agent
     from cora.core.loop_logging import (
         PerCallTimeoutExceeded,
         WallTimeExceeded,
@@ -278,6 +278,7 @@ async def continue_on_t1(
         api_key=llm_gateway_key,
         model_alias=t1_model_alias,
         system_prompt=system_prompt,
+        provider=cfg.llm_provider if cfg is not None else _c.DEFAULT_LLM_PROVIDER,
         mcp_servers=mcp_servers,
         mcp_allowed_tools=mcp_allowed_for_filter,
         local_tools=_make_pydantic_ai_local_tools(
@@ -364,17 +365,17 @@ async def continue_on_t1(
                 leadin_prompt,
                 message_history=message_history_arg,
                 deps=deps,
-                model_settings=ModelSettings(
-                    # Same per-call cap as T0 (deep_review.py): fit the
-                    # model's reasoning trace plus the turn's output.
-                    # See `_c.DEEP_MAX_OUTPUT_TOKENS`.
+                # Same per-call cap as T0 (deep_review.py): fit the
+                # model's reasoning trace plus the turn's output.
+                # See `_c.DEEP_MAX_OUTPUT_TOKENS`.
+                model_settings=build_model_settings(
+                    cfg,
                     max_tokens=(
                         cfg.deep_max_output_tokens
                         if cfg is not None
                         else _c.DEEP_MAX_OUTPUT_TOKENS
                     ),
-                    temperature=0.2,
-                    timeout=timeout_s,
+                    timeout_s=timeout_s,
                 ),
                 usage_limits=UsageLimits(request_limit=max_iterations),
             ) as agent_run:
@@ -523,6 +524,7 @@ async def continue_on_t1(
     budget.record_litellm_headers(captured)
     budget.set_resolved_model(
         resolved_model_from(captured)
+        or model_name_from_result(result)
         or f"unknown (T1 on {t1_model_alias}, no x-litellm-* headers)"
     )
 

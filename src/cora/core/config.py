@@ -56,6 +56,19 @@ DEFAULT_USE_GITHUB_REVIEW = False
 # defaults are never exercised there.
 DEFAULT_LITELLM_BASE = "http://localhost:4000"
 DEFAULT_MODEL = "review"  # LiteLLM alias
+
+# Which dialect `cora.core.agent.make_review_agent` speaks to the LLM.
+# `"openai-compatible"` (the default) is the existing behaviour —
+# talk OpenAI Chat Completions to whatever `llm_base_url` points at
+# (a LiteLLM gateway, vLLM-direct, OpenRouter, ...). `"anthropic"` /
+# `"bedrock"` are gateway-less direct-SDK paths for an adopter with
+# only an Anthropic API key / AWS credentials — no proxy in between.
+# Mirrored as `ReviewerConfig.llm_provider` (env `LLM_PROVIDER`); the
+# default keeps every existing deployment byte-identical.
+DEFAULT_LLM_PROVIDER = "openai-compatible"
+SUPPORTED_LLM_PROVIDERS: frozenset[str] = frozenset(
+    {"openai-compatible", "anthropic", "bedrock"}
+)
 DEFAULT_MCP_URL = "http://localhost:8080/mcp"
 
 # Cold-start pretrigger — which `model` aliases the warmup fires at (see

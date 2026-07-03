@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from cora.core import config as _c
-from cora.core.budget import resolve_run_usage, usage_tokens
+from cora.core.budget import model_name_from_result, resolve_run_usage, usage_tokens
 
 if TYPE_CHECKING:
     from cora.config import ReviewerConfig
@@ -46,11 +46,11 @@ async def quick_review_call(
     # — `("", "pydantic-ai unavailable: ...")` maps to a `cancelled`
     # check-run.
     try:
-        from pydantic_ai import ModelSettings
+        import pydantic_ai  # noqa: F401
     except ImportError as exc:
         return "", f"pydantic-ai unavailable: {exc}"
 
-    from cora.core.agent import AgentConfig, Deps, make_review_agent
+    from cora.core.agent import AgentConfig, Deps, build_model_settings, make_review_agent
     from cora.core.rate_limit import run_with_rate_limit_backoff
 
     agent_config = AgentConfig(
@@ -58,6 +58,7 @@ async def quick_review_call(
         api_key=llm_gateway_key,
         model_alias=model_alias,
         system_prompt=system_prompt,
+        provider=cfg.llm_provider if cfg is not None else _c.DEFAULT_LLM_PROVIDER,
         # `retries=1` matches the existing leak-retry budget — no
         # tool-call retries because quick mode doesn't expose tools.
         retries=1,
@@ -94,10 +95,8 @@ async def quick_review_call(
         return await agent.run(
             initial_user_prompt,
             deps=deps,
-            model_settings=ModelSettings(
-                max_tokens=max_tokens,
-                temperature=0.2,
-                timeout=timeout_s,
+            model_settings=build_model_settings(
+                cfg, max_tokens=max_tokens, timeout_s=timeout_s
             ),
         )
 
@@ -171,7 +170,9 @@ async def quick_review_call(
     captured = drain_captured_headers()
     budget.record_litellm_headers(captured)
     budget.set_resolved_model(
-        resolved_model_from(captured) or "unknown (no x-litellm-* headers)"
+        resolved_model_from(captured)
+        or model_name_from_result(result)
+        or "unknown (no x-litellm-* headers)"
     )
 
     # `result.output` is a string when `output_type=str` (the factory
@@ -199,9 +200,8 @@ async def _recover_quick(
     `spiral_recovery_max_output_tokens`. Returns the pydantic-ai result
     on success, or None if recovery raises (caller soft-fails).
     """
-    from pydantic_ai import ModelSettings
-
     from cora.core import spiral as _spiral
+    from cora.core.agent import build_model_settings
 
     leadin = _spiral.build_recovery_leadin(
         _spiral.extract_partial_reasoning(
@@ -213,10 +213,10 @@ async def _recover_quick(
             leadin,
             message_history=msgs,
             deps=deps,
-            model_settings=ModelSettings(
+            model_settings=build_model_settings(
+                cfg,
                 max_tokens=cfg.spiral_recovery_max_output_tokens,
-                temperature=0.2,
-                timeout=timeout_s,
+                timeout_s=timeout_s,
             ),
         )
     except Exception as exc:  # noqa: BLE001 — recovery is best-effort

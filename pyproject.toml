@@ -52,6 +52,20 @@ otel = [
     "opentelemetry-sdk==1.42.1",
     "opentelemetry-exporter-otlp-proto-grpc==1.42.1",
 ]
+# Direct-SDK provider seam (`LLM_PROVIDER=anthropic` /
+# `ReviewerConfig.llm_provider="anthropic"`) — gateway-less, straight
+# to the Anthropic API. Only pulled in when an adopter opts in; the
+# default `"openai-compatible"` path never imports the `anthropic` SDK
+# (`cora.core.agent` imports it lazily inside the provider branch).
+anthropic = [
+    "pydantic-ai-slim[anthropic]>=1.102",
+]
+# Direct-SDK provider seam for Amazon Bedrock (`LLM_PROVIDER=bedrock`)
+# — AWS credential chain, no gateway. Same lazy-import discipline as
+# the `anthropic` extra above.
+bedrock = [
+    "pydantic-ai-slim[bedrock]>=1.102",
+]
 dev = [
     "pytest",
     "ruff",

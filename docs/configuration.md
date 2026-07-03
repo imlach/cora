@@ -14,12 +14,14 @@ below are the supported adopter-facing knobs.
 | `LLM_GATEWAY_KEY` | API key for the OpenAI-compatible endpoint |
 | `LITELLM_BASE_URL` | OpenAI-compatible base URL |
 | `REVIEW_MODEL` | Model alias sent to the endpoint |
+| `LLM_PROVIDER` | `openai-compatible` (default) / `anthropic` / `bedrock` — see below |
 
 `LITELLM_BASE_URL` is named for the LiteLLM gateway convention, but the
 client expects any OpenAI-compatible API — it can point at LiteLLM, vLLM,
 or another compatible gateway. See
 [Running against a cloud provider](#running-against-a-cloud-provider)
-for the Anthropic/Bedrock topology.
+for the Anthropic/Bedrock topology, including the gateway-less
+`LLM_PROVIDER=anthropic`/`bedrock` direct-SDK paths.
 
 ## Review Mode And Budgets
 
@@ -135,6 +137,13 @@ behind review setup:
 
 ## Running against a cloud provider
 
+cora talks to a cloud model one of two ways: through an OpenAI-compatible
+gateway (the default, works today with zero code changes), or directly
+against the Anthropic API / Amazon Bedrock via `LLM_PROVIDER` — no proxy
+in between.
+
+### Via a gateway (default `LLM_PROVIDER=openai-compatible`)
+
 cora speaks one dialect — OpenAI Chat Completions — to whatever
 `LITELLM_BASE_URL` points at. Cloud models work today by letting the
 gateway do the translation: run a [LiteLLM proxy](https://docs.litellm.ai/)
@@ -189,5 +198,57 @@ Notes for cloud deployments:
   caching helps: cora's agent loop has a frozen system prompt and an
   append-only history, so multi-turn prefixes are highly cacheable.
 
-Direct provider SDK support (Anthropic / Bedrock without a gateway) is
-planned as a provider seam in the agent factory — see the issue tracker.
+### Direct — no gateway (`LLM_PROVIDER=anthropic` / `bedrock`)
+
+An adopter with only an Anthropic API key (or AWS credentials for
+Bedrock) can skip the gateway entirely. `LLM_PROVIDER` selects the
+dialect `make_review_agent` speaks; the default `openai-compatible`
+value keeps every existing deployment byte-identical — this is
+opt-in.
+
+**Anthropic:**
+
+```bash
+export LLM_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=sk-ant-...   # or LLM_GATEWAY_KEY, which wins if both are set
+export REVIEW_MODEL=claude-sonnet-5
+export T1_MODEL=claude-opus-4-8        # optional — T1 continuation tier
+```
+
+Requires the `cora[anthropic]` extra (`pip install 'cora[anthropic]'`);
+the import is lazy, so installing the base package alone never pulls in
+the `anthropic` SDK. `LITELLM_BASE_URL` is ignored on this path unless
+explicitly pointed somewhere other than its `localhost:4000` default —
+set it only when routing through an Anthropic-compatible proxy that
+isn't LiteLLM.
+
+**Bedrock:**
+
+```bash
+export LLM_PROVIDER=bedrock
+export AWS_REGION=us-east-1            # standard AWS credential chain — no LLM_GATEWAY_KEY needed
+export REVIEW_MODEL=claude-opus-4-8    # the `anthropic.` Bedrock prefix is added automatically
+```
+
+Requires the `cora[bedrock]` extra (`pip install 'cora[bedrock]'`,
+which pulls in `boto3`). Authenticates via the standard AWS credential
+chain (env vars, shared profile, instance role, ...) — no API key
+field is read or required.
+
+**Both direct paths, by design:**
+
+- **Sampling parameters are dropped.** cora's engine tunes
+  `temperature=0.2` for the gateway path; current Claude models reject
+  non-default `temperature`/`top_p`/`top_k` with a 400, so the direct
+  paths omit them entirely rather than forwarding a value that would
+  break every call.
+- **The vLLM `enable_thinking` toggle never fires.** `AGENT_REVIEW_ENABLE_THINKING`
+  is a self-hosted-reasoning-backend knob (`chat_template_kwargs` is a
+  vLLM extra_body shape); cloud Claude models use their own adaptive-
+  thinking defaults instead, so it's a no-op here rather than an error.
+- **The check-run "Backend" chip still works** — with no `x-litellm-*`
+  headers to read (there's no gateway to emit them), it falls back to
+  the provider response's own `model` field.
+- **Deep mode is unchanged** — the agent loop, MCP attachments, and
+  local `grep_repo`/`git_show` tools all work identically; only the
+  model-construction seam differs.

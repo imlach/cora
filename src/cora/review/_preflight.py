@@ -120,7 +120,10 @@ def preflight(run: ReviewRun) -> ReviewResult | None:
     else:
         print("::warning::could not derive PR head SHA; verdict check skipped")
 
-    if not run.api_key:
+    # Bedrock authenticates via the AWS credential chain, not an API
+    # key — the other providers (openai-compatible, anthropic) still
+    # require one.
+    if not run.api_key and cfg.llm_provider != "bedrock":
         print("::warning::LLM gateway key not set — skipping review")
         try:
             run.reporter.post_skip(
