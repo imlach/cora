@@ -2,6 +2,10 @@
 
 > a convention-oriented review agent
 
+[![CI](https://github.com/imlach/cora/actions/workflows/ci.yml/badge.svg)](https://github.com/imlach/cora/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/imlach/cora)](https://github.com/imlach/cora/releases)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 A self-hostable agentic PR reviewer for teams running their own LLM.
 cora reads a pull request the way the repo's conventions say it should
 be read — DECISIONS.md records, CLAUDE.md/AGENTS.md rules, CI state,
