@@ -1,0 +1,80 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cora"
+dynamic = ["version"]
+description = "a convention-oriented review agent"
+readme = "README.md"
+# 3.11 is the floor cora is actually tested on (CI matrix + ruff target);
+# the prior 3.10 was claimed but never exercised.
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{ name = "Ross Imlach" }]
+keywords = ["code-review", "pull-request", "llm", "agent", "gitops", "ci"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Version Control :: Git",
+]
+
+# Lower-bound floors, not exact pins: cora is a library, so adopters
+# resolve these against their own tree. (A deployment that needs exact
+# pins can install the wheel `--no-deps` against its own lockfile.)
+# Floors are the versions cora was developed and tested against.
+dependencies = [
+    "openai>=2.38,<3",
+    "mcp[cli]>=1.27",
+    "pydantic-ai-slim[openai,mcp]>=1.102",
+    "httpx>=0.27",
+]
+
+[project.urls]
+Homepage = "https://github.com/imlach/cora"
+Repository = "https://github.com/imlach/cora"
+Issues = "https://github.com/imlach/cora/issues"
+
+[project.scripts]
+cora = "cora.__main__:main"
+
+[project.optional-dependencies]
+# Telemetry is opt-in — the engine imports opentelemetry lazily.
+otel = [
+    "opentelemetry-sdk==1.42.1",
+    "opentelemetry-exporter-otlp-proto-grpc==1.42.1",
+]
+dev = [
+    "pytest",
+    "ruff",
+    "build",
+]
+
+# Per-commit versions (issue #4): `git describe`-derived, e.g.
+# `0.0.1.dev42+g1a2b3c4` — unique per commit, so re-installing a
+# re-vendored wheel is never a same-version pip no-op (the stale-wheel
+# trap DEC-113 hit). The fallback covers tarball/no-git builds.
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.0.0.dev0"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/cora/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cora"]
+
+[tool.ruff]
+src = ["src", "tests"]
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

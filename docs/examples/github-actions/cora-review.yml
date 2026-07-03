@@ -1,0 +1,52 @@
+name: cora
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: cora-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # With pull_request, fork PRs do not receive repository secrets. Skip
+    # them here; use the approval-label flow in SECURITY.md if you want a
+    # maintainer-vouched comment-only review.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install cora
+        # cora is distributed as a GHCR container (primary) and as a
+        # release wheel; it is not on PyPI. Pin to a released tag. For a
+        # container-native runner you can instead skip setup-python and use
+        #   uses: docker://ghcr.io/imlach/cora:0.1.0
+        run: pip install "git+https://github.com/imlach/cora@v0.1.0"
+
+      - name: Run review
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LLM_GATEWAY_KEY: ${{ secrets.LLM_GATEWAY_KEY }}
+          LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          REVIEW_MODEL: ${{ vars.REVIEW_MODEL || 'review' }}
+          MAX_TOOL_ITERATIONS: "0"
+          REVIEW_TRIGGER_ENFORCE: "true"
+          REVIEW_TRIGGER_MAX_RUNS_PER_HOUR: "30"
+          REVIEW_TRIGGER_MAX_RUNS_PER_AUTHOR_PER_HOUR: "6"
+        run: python -m cora

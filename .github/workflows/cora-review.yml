@@ -1,0 +1,185 @@
+name: cora
+
+# Dogfood: cora reviews its own PRs. One workflow, modes determined by
+# the label that fired it:
+#
+#   - `review-quick`  → MAX_TOOL_ITERATIONS=0; single LLM call, no MCP.
+#   - `review-deep`   → full agent loop (MCP tools + local
+#                       grep_repo / git_show).
+#   - `review-large`  → deep, but starts directly on T1 (skips T0).
+#   - `review-lite`   → quick-mode on the `review-lite` LiteLLM alias.
+#
+# Day-1 minimal wiring: LLM_GATEWAY_KEY, GITHUB_TOKEN, and optionally a
+# cora GitHub App token minted from CORA_APP_ID/CORA_APP_PRIVATE_KEY are
+# provided. Endpoint URLs (LLM gateway, MCP, retrieval) come from repo
+# *variables* so no infrastructure hostname is checked in; everything
+# needing explicit auth or setup (MCP actions, web-fetch-gate, OTel,
+# propose_patch dispatch wiring) is off, and the engine soft-skips each.
+#
+# Dogfood twist: the reviewer runs the PR's own cora checkout, so a PR
+# that breaks the engine breaks its own review — that's signal, and the
+# soft-fail posture turns it into a "skipped" comment, not a red check.
+#
+# Internal dogfood only: the job targets the self-hosted runner named by
+# the CORA_REVIEW_RUNNER repo variable (the LLM gateway is only
+# reachable from there). Fork PRs are skipped at the same-repo gate.
+# Public/adopter workflow wiring lives in
+# docs/examples/github-actions/cora-review.yml.
+#
+# Check naming: the workflow job renders as `cora / review`; the verdict
+# check-run the engine posts is named just `cora` (the engine default
+# since #28). Keep the job name static: skipped jobs can surface
+# unevaluated expressions in the PR checks rollup.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+concurrency:
+  # Supersede an in-flight review only on a real new commit or an
+  # explicit review-* re-label; a non-review label-apply must not cancel
+  # a just-started review (avoids the automerge/classifier label race).
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: >-
+    ${{ github.event.action == 'synchronize' ||
+        (github.event.action == 'labeled' &&
+         startsWith(github.event.label.name, 'review-')) }}
+
+permissions:
+  contents: read
+  pull-requests: write   # post / edit the review comment
+  checks: write          # POST/PATCH the verdict check-run
+
+jobs:
+  review:
+    name: review
+    # Same-repo PRs only; re-fire on review-* labels only; PR must carry
+    # a review-* label at all.
+    if: |
+      github.repository == 'imlach/cora' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.action != 'labeled' || startsWith(github.event.label.name, 'review-')) &&
+      (contains(github.event.pull_request.labels.*.name, 'review-quick') ||
+       contains(github.event.pull_request.labels.*.name, 'review-deep') ||
+       contains(github.event.pull_request.labels.*.name, 'review-large') ||
+       contains(github.event.pull_request.labels.*.name, 'review-lite'))
+    runs-on: ${{ vars.CORA_REVIEW_RUNNER || 'ubuntu-latest' }}
+    # 20min covers T0 (360s) + T1 (600s) + headroom; review-large doubles
+    # T1 to 1200s, so the outer bound moves to 30 in lockstep.
+    timeout-minutes: ${{ contains(github.event.pull_request.labels.*.name, 'review-large') && 30 || 20 }}
+    env:
+      CORA_APP_ID: ${{ secrets.CORA_APP_ID }}
+      CORA_APP_PRIVATE_KEY: ${{ secrets.CORA_APP_PRIVATE_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Mint cora App token
+        id: cora-app-token
+        if: ${{ env.CORA_APP_ID != '' && env.CORA_APP_PRIVATE_KEY != '' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ env.CORA_APP_ID }}
+          private-key: ${{ env.CORA_APP_PRIVATE_KEY }}
+
+      - name: Resolve agent venv
+        # Prefer the baked /opt/agent-venv from the self-hosted runner image
+        # (openai + mcp[cli] + pydantic-ai-slim pre-installed); install
+        # cora from THIS checkout so the PR under review is the engine
+        # that reviews it. Fall back to a per-job venv with cora's own
+        # pins when the baked venv is absent.
+        id: agent-venv
+        run: |
+          if [[ -x /opt/agent-venv/bin/python ]]; then
+            VENV=/opt/agent-venv
+            PYTHONPATH_VALUE="$PWD/src"
+            echo "Using baked venv at /opt/agent-venv with source checkout on PYTHONPATH"
+          else
+            python3 -m venv .agent-venv
+            .agent-venv/bin/pip install --quiet --upgrade pip
+            .agent-venv/bin/pip install --quiet -e .
+            VENV="$PWD/.agent-venv"
+            PYTHONPATH_VALUE=""
+            echo "Baked venv not present; built per-job venv at $VENV"
+          fi
+          echo "venv=$VENV" >> "$GITHUB_OUTPUT"
+          echo "pythonpath=$PYTHONPATH_VALUE" >> "$GITHUB_OUTPUT"
+
+      - name: Determine mode
+        # Label → mode mapping, most-permissive wins (large > deep >
+        # lite > quick).
+        id: mode
+        run: |
+          if [[ "${{ contains(github.event.pull_request.labels.*.name, 'review-large') }}" == "true" ]]; then
+            echo "max_iterations=12" >> "$GITHUB_OUTPUT"
+            echo "skip_t0=true" >> "$GITHUB_OUTPUT"
+            echo "t1_max_iterations=12" >> "$GITHUB_OUTPUT"
+            echo "t1_wall_time_s=1200" >> "$GITHUB_OUTPUT"
+            echo "review_model=review" >> "$GITHUB_OUTPUT"
+            echo "Mode: large (skip T0, start on T1, extended budgets)"
+          elif [[ "${{ contains(github.event.pull_request.labels.*.name, 'review-deep') }}" == "true" ]]; then
+            echo "max_iterations=12" >> "$GITHUB_OUTPUT"
+            echo "skip_t0=false" >> "$GITHUB_OUTPUT"
+            echo "t1_max_iterations=6" >> "$GITHUB_OUTPUT"
+            echo "t1_wall_time_s=600" >> "$GITHUB_OUTPUT"
+            echo "review_model=review" >> "$GITHUB_OUTPUT"
+            echo "Mode: deep"
+          elif [[ "${{ contains(github.event.pull_request.labels.*.name, 'review-lite') }}" == "true" ]]; then
+            echo "max_iterations=0" >> "$GITHUB_OUTPUT"
+            echo "skip_t0=false" >> "$GITHUB_OUTPUT"
+            echo "t1_max_iterations=6" >> "$GITHUB_OUTPUT"
+            echo "t1_wall_time_s=600" >> "$GITHUB_OUTPUT"
+            echo "review_model=review-lite" >> "$GITHUB_OUTPUT"
+            echo "Mode: lite (quick-mode on review-lite alias)"
+          else
+            echo "max_iterations=0" >> "$GITHUB_OUTPUT"
+            echo "skip_t0=false" >> "$GITHUB_OUTPUT"
+            echo "t1_max_iterations=6" >> "$GITHUB_OUTPUT"
+            echo "t1_wall_time_s=600" >> "$GITHUB_OUTPUT"
+            echo "review_model=review" >> "$GITHUB_OUTPUT"
+            echo "Mode: quick"
+          fi
+
+      - name: Run reviewer
+        env:
+          # Line-buffer stdout so loop lines land in the GHA log live.
+          PYTHONUNBUFFERED: "1"
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer the cora GitHub App for comments/check-runs so the
+          # audit actor is cora[bot]; empty falls back to GITHUB_TOKEN.
+          CORA_GH_TOKEN: ${{ steps.cora-app-token.outputs.token }}
+          # LiteLLM master key; missing → the engine posts a "skipped:
+          # secret not configured" comment and exits 0.
+          LLM_GATEWAY_KEY: ${{ secrets.LLM_GATEWAY_KEY }}
+          # Endpoint URLs are repo *secrets*, not variables: this repo is
+          # public and Actions logs print env values — secrets get masked.
+          # Unset → engine localhost default (review soft-skips).
+          LITELLM_BASE_URL: ${{ secrets.CORA_LLM_BASE_URL }}
+          REVIEW_MODEL: ${{ steps.mode.outputs.review_model }}
+          MAX_TOOL_ITERATIONS: ${{ steps.mode.outputs.max_iterations }}
+          AGENT_REVIEW_SKIP_T0: ${{ steps.mode.outputs.skip_t0 }}
+          AGENT_REVIEW_T1_CONTINUATION: "true"
+          AGENT_REVIEW_T1_MAX_ITERATIONS: ${{ steps.mode.outputs.t1_max_iterations }}
+          # Per-tier wall budgets, split so a slow T0 can't starve T1.
+          # Quick mode ignores both.
+          T0_WALL_TIME_S: "360"
+          T1_WALL_TIME_S: ${{ steps.mode.outputs.t1_wall_time_s }}
+          # MCP + retrieval endpoints from repo secrets (masked in public
+          # logs); unset → the engine's localhost defaults, and deep mode
+          # soft-skips on the probe. The knowledge corpus documents cora's
+          # own design, so retrieval is relevant for dogfood too.
+          MCP_URL: ${{ secrets.CORA_MCP_URL }}
+          QDRANT_URL: ${{ secrets.CORA_QDRANT_URL }}
+          TEI_URL: ${{ secrets.CORA_TEI_URL }}
+          RERANKER_URL: ${{ secrets.CORA_RERANKER_URL }}
+          QDRANT_COLLECTION: ${{ secrets.CORA_QDRANT_COLLECTION }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          # Bearer token for the MCP server (deep mode). Unset → no auth
+          # headers are sent.
+          MCP_TOKEN: ${{ secrets.CORA_MCP_TOKEN }}
+          # Not set here: MCP_ACTIONS_*, WEB_FETCH_GATE_URL,
+          # OTEL_EXPORTER_OTLP_ENDPOINT — the engine soft-skips each.
+          PYTHONPATH: ${{ steps.agent-venv.outputs.pythonpath }}
+        run: ${{ steps.agent-venv.outputs.venv }}/bin/python -m cora

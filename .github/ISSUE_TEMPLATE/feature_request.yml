@@ -1,0 +1,32 @@
+name: Feature request
+description: Propose a capability, config knob, or provider seam.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        cora generalises by adding **seams**, not by deleting the current
+        default. Framing a request as "a new config field / provider
+        implementation, with the current behaviour as the default" makes it
+        much easier to accept.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't you do today, and in what deployment?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: >-
+        The capability. If it changes engine behaviour, what is the default
+        (ideally: unchanged), and what seam/config field exposes the override?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried, or other designs you weighed.

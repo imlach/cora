@@ -1,0 +1,70 @@
+services:
+  dev:
+    build:
+      context: .
+      target: dev
+    image: cora:dev
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - cora-cache:/tmp/agent-review-cache
+    environment:
+      CORA_REPO_ROOT: /workspace
+      AGENT_REVIEW_CACHE_DIR: /tmp/agent-review-cache
+      GH_REPO: ${GH_REPO:-}
+      PR_NUMBER: ${PR_NUMBER:-}
+      GH_TOKEN: ${GH_TOKEN:-}
+      LLM_GATEWAY_KEY: ${LLM_GATEWAY_KEY:-}
+      LITELLM_BASE_URL: ${LITELLM_BASE_URL:-}
+      REVIEW_MODEL: ${REVIEW_MODEL:-}
+      MAX_TOOL_ITERATIONS: ${MAX_TOOL_ITERATIONS:-0}
+      AGENT_REVIEW_RETRIEVAL_GLOB: ${AGENT_REVIEW_RETRIEVAL_GLOB:-}
+      REVIEW_PROPOSE_PATCH_DISPATCH: ${REVIEW_PROPOSE_PATCH_DISPATCH:-false}
+      REVIEW_TRIGGER_ENFORCE: ${REVIEW_TRIGGER_ENFORCE:-true}
+      REVIEW_TRIGGER_UNTRUSTED_ACTION: ${REVIEW_TRIGGER_UNTRUSTED_ACTION:-skip}
+      REVIEW_TRIGGER_FORK_ACTION: ${REVIEW_TRIGGER_FORK_ACTION:-comment-only}
+    command: bash
+    stdin_open: true
+    tty: true
+
+  test:
+    build:
+      context: .
+      target: dev
+    image: cora:dev
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - cora-cache:/tmp/agent-review-cache
+    environment:
+      CORA_REPO_ROOT: /workspace
+      AGENT_REVIEW_CACHE_DIR: /tmp/agent-review-cache
+    command: pytest -q
+
+  review:
+    build:
+      context: .
+      target: runtime
+    image: cora:local
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:ro
+      - cora-cache:/tmp/agent-review-cache
+    environment:
+      CORA_REPO_ROOT: /workspace
+      AGENT_REVIEW_CACHE_DIR: /tmp/agent-review-cache
+      GH_REPO: ${GH_REPO:-}
+      PR_NUMBER: ${PR_NUMBER:-}
+      GH_TOKEN: ${GH_TOKEN:-}
+      LLM_GATEWAY_KEY: ${LLM_GATEWAY_KEY:-}
+      LITELLM_BASE_URL: ${LITELLM_BASE_URL:-}
+      REVIEW_MODEL: ${REVIEW_MODEL:-}
+      MAX_TOOL_ITERATIONS: ${MAX_TOOL_ITERATIONS:-0}
+      AGENT_REVIEW_RETRIEVAL_GLOB: ${AGENT_REVIEW_RETRIEVAL_GLOB:-}
+      REVIEW_PROPOSE_PATCH_DISPATCH: ${REVIEW_PROPOSE_PATCH_DISPATCH:-false}
+      REVIEW_TRIGGER_ENFORCE: ${REVIEW_TRIGGER_ENFORCE:-true}
+      REVIEW_TRIGGER_UNTRUSTED_ACTION: ${REVIEW_TRIGGER_UNTRUSTED_ACTION:-skip}
+      REVIEW_TRIGGER_FORK_ACTION: ${REVIEW_TRIGGER_FORK_ACTION:-comment-only}
+
+volumes:
+  cora-cache:

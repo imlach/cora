@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cora - a convention-oriented review agent</title>
+<meta name="description" content="cora is a self-hostable, opinionated agentic PR reviewer for teams running their own LLM: verdict-gated merges, deep tool-using review, zero required infrastructure.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%231a7f37'/></svg>">
+</head>
+<body>
+
+<header class="masthead reveal">
+  <div class="masthead-rule" aria-hidden="true">
+    <span class="dot g"></span><span class="dot y"></span><span class="dot r"></span>
+  </div>
+  <h1 class="wordmark">cora</h1>
+  <p class="tagline">a convention-oriented review agent</p>
+  <p class="masthead-meta">
+    <span class="chip">pre-release</span>
+    <span class="sep">·</span>
+    self-hostable agentic PR review
+    <span class="sep">·</span>
+    <a href="https://github.com/imlach/cora">source</a>
+  </p>
+  <p class="abstract">
+    cora reads a pull request the way a careful colleague would - diff, history,
+    surrounding code, your conventions - and produces a verdict your merge
+    gate can require. Built for GitOps and IaC teams running their own LLM,
+    extracted from a cluster where it reviews every PR in production. No
+    vector store, no SaaS, no agent platform required.
+  </p>
+</header>
+
+<nav class="toc reveal" aria-label="Contents">
+  <span class="toc-label">contents</span>
+  <ol>
+    <li><a href="#review">A review, end to end</a></li>
+    <li><a href="#verdict">The verdict contract</a></li>
+    <li><a href="#infra">Zero infrastructure by default</a></li>
+    <li><a href="#security">Reviewing hostile input</a></li>
+    <li><a href="#config">One config object</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<section id="review" class="reveal">
+  <h2><span class="sec-no">§1</span> A review, end to end</h2>
+  <p>
+    Every review starts from a plain <code>pull_request</code> event on a
+    GitHub-hosted runner and ends in three artifacts: a sticky comment, a
+    check run, and (optionally) proposed patches. In between, cora picks one
+    of two modes.
+  </p>
+
+  <figure class="diagram">
+<pre aria-label="Review flow diagram">
+                 pull_request event
+                        │
+                 TriggerPolicy ──── deny ──▶  skip · check run fails closed
+                        │ allow
+        context: diff + PR metadata + retrieved docs
+                        │
+          ┌─────────────┴─────────────┐
+        quick                       deep
+   one LLM call,             multi-turn agent loop:
+   no tools                  grep_repo · git_show · MCP,
+                             token + tool-call budgets
+          └─────────────┬─────────────┘
+                  wall-clock hit?
+                        │──── yes ──▶  escalate a tier, continue
+                        │
+              verdict:  🟢 · 🟡 · 🔴
+                        │
+        ┌───────────────┼───────────────┐
+  sticky comment    check run «cora»   propose_patch
+  edited in place,  required by your   hybrid patch
+  &lt;!-- cora:v1 --&gt;  branch protection  dispatch
+</pre>
+    <figcaption>Fig. 1 - the review flow. Soft failures skip loudly; they never fake a verdict.</figcaption>
+  </figure>
+
+  <dl class="modes">
+    <div>
+      <dt><code>quick</code></dt>
+      <dd>A single LLM call over the assembled context. Cheap, fast, no tools -
+      the mode untrusted PRs are forced down.</dd>
+    </div>
+    <div>
+      <dt><code>deep</code></dt>
+      <dd>A multi-turn agent that greps the checkout, reads blame and history,
+      and calls your MCP tools - under explicit token and tool-call budgets.
+      When a deep review hits its wall-clock limit, an escalation ladder can
+      hand the transcript to a bigger model and keep going instead of giving
+      up. A single-model deployment is simply a one-rung ladder.</dd>
+    </div>
+  </dl>
+
+  <p>
+    Review prompts are conventions, not magic: cora is told to verify before
+    it flags, to reserve its strongest severity for breakage it has personally
+    confirmed, and to say nothing about style your linters already enforce.
+    A false-positive blocker on a teammate's PR is treated as the worst
+    failure mode the system has.
+  </p>
+</section>
+
+<section id="verdict" class="reveal">
+  <h2><span class="sec-no">§2</span> The verdict contract</h2>
+  <p>
+    The whole point of an automated reviewer is a signal you can gate on.
+    cora's output is a fixed, parseable vocabulary:
+  </p>
+
+  <table class="vocab">
+    <thead><tr><th>verdict</th><th>meaning</th><th>check run</th></tr></thead>
+    <tbody>
+      <tr><td><span class="v g">🟢 looks good</span></td><td>nothing worth holding the merge for</td><td class="ok">success</td></tr>
+      <tr><td><span class="v y">🟡 minor</span></td><td>suggestions worth reading, none blocking</td><td class="ok">success</td></tr>
+      <tr><td><span class="v r">🔴 needs changes</span></td><td>at least one verified blocker</td><td class="bad">failure</td></tr>
+      <tr><td><span class="v n">- no verdict</span></td><td>review skipped, errored, or denied</td><td class="bad">fails closed</td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    Findings inside the comment use two severities:
+    <strong class="f-blocker">🚨 Blocker</strong> - only for things the agent
+    has verified will break, with <code>file:line</code> and what to fix - and
+    <strong class="f-concern">⚠️ Concern</strong> for suggestion-grade issues.
+    The verdict lands as a check run named <code>cora</code>; make it a
+    required status check and the verdict is your merge gate. A
+    <code>review-override</code> label is the deliberate, audit-visible escape
+    hatch when a human decides the robot is wrong.
+  </p>
+
+  <figure class="comment-card">
+    <div class="comment-head">
+      <span class="avatar" aria-hidden="true">c</span>
+      <span class="comment-author">cora</span>
+      <span class="comment-meta">commented on this pull request</span>
+    </div>
+    <div class="comment-body">
+      <p class="comment-marker">&lt;!-- cora:v1 --&gt;</p>
+      <h3>cora review - 🟡 minor</h3>
+      <ul>
+        <li><span class="f-concern">⚠️ Concern:</span>
+          <code>charts/ingress/values.yaml:41</code> - the new timeout is
+          set on the Service but the upstream annotation at
+          <code>templates/ingress.yaml:23</code> still pins 30s; the lower
+          one wins.</li>
+        <li><span class="f-concern">⚠️ Concern:</span>
+          <code>scripts/rotate.sh:12</code> - <code>set -e</code> without
+          <code>pipefail</code>; the <code>curl | jq</code> on line 19 can
+          fail silently.</li>
+      </ul>
+      <p class="comment-foot">deep review · 2 tiers · 41 tool calls · edited in place on the next push</p>
+    </div>
+    <figcaption>Fig. 2 - the sticky comment. One comment per PR, found by its
+    marker and edited on every re-review, so the thread never silts up.</figcaption>
+  </figure>
+
+  <p>
+    Re-reviews are CI-failure-aware: when your pipeline fails after a verdict,
+    cora re-reads the PR with the failure in hand. And because the engine
+    targets self-hosted reasoning models, it strips chain-of-thought leaks
+    from output before anything reaches GitHub.
+  </p>
+</section>
+
+<section id="infra" class="reveal">
+  <h2><span class="sec-no">§3</span> Zero infrastructure by default</h2>
+  <p>
+    Everything cluster-shaped sits behind a provider seam with a working
+    default, so <code>pip install</code> plus an OpenAI-compatible endpoint is
+    a complete deployment - and each seam upgrades independently when you have
+    the infrastructure to back it.
+  </p>
+
+  <table class="providers">
+    <thead><tr><th>seam</th><th>default</th><th>upgrades to</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>RetrievalProvider</code></td>
+        <td>none - review runs on the diff and your conventions file</td>
+        <td>BM25 over your local docs (<code>Glob</code>, zero infra), or hybrid
+            dense+sparse Qdrant with TEI reranking</td>
+      </tr>
+      <tr>
+        <td><code>GitProvider</code></td>
+        <td>the local checkout - <code>grep_repo</code>, <code>git show</code></td>
+        <td>your own SCM backend</td>
+      </tr>
+      <tr>
+        <td><code>Reporter</code></td>
+        <td>GitHub comment + check run</td>
+        <td><code>NullReporter</code> for dry-runs and evals - a review returns a
+            plain <code>ReviewResult</code> you can inspect</td>
+      </tr>
+      <tr>
+        <td>LLM</td>
+        <td colspan="2">any OpenAI-compatible endpoint - built for self-hosted
+            models, with an escalation ladder across however many tiers you run</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    CI for cora itself runs on GitHub-hosted runners with no private
+    infrastructure - the same constraint an adopter starts from.
+  </p>
+</section>
+
+<section id="security" class="reveal">
+  <h2><span class="sec-no">§4</span> Reviewing hostile input</h2>
+  <p>
+    A PR reviewer executes a tool-using agent against attacker-controlled
+    text. cora's posture is <em>diff-as-data</em>: PR content is evidence to
+    evaluate, never instructions to follow - and an injection attempt in a
+    diff is itself flagged as a 🚨 Blocker.
+  </p>
+  <p>
+    Above the prompt sits <code>TriggerPolicy</code>, a default-deny gate on
+    who may fire a review and at what capability: author trust rules
+    (association, allowlist, or an approval label), a comment-only ceiling for
+    untrusted and fork PRs - forced quick mode, no patch dispatch - and rate
+    caps per author and per repo. Trust lookups fail closed. The shipped
+    workflow template runs on plain <code>pull_request</code>, never
+    <code>pull_request_target</code>.
+  </p>
+  <p>
+    The full threat model, policy reference, and canonical workflow wiring
+    live in <a href="https://github.com/imlach/cora/blob/main/SECURITY.md">SECURITY.md</a>.
+    Read it before pointing cora at a repo where strangers can open PRs.
+  </p>
+</section>
+
+<section id="config" class="reveal">
+  <h2><span class="sec-no">§5</span> One config object</h2>
+  <p>
+    A review is driven by a single dataclass, <code>ReviewerConfig</code>.
+    Every engine tunable is a field on it; <code>from_env()</code> maps the
+    same fields onto workflow environment variables, so a deployment is just
+    env vars in a job. No YAML dialect, no second config system.
+  </p>
+
+  <figure class="code">
+<pre><code><span class="kw">from</span> cora <span class="kw">import</span> ReviewerConfig, run_review
+
+cfg = ReviewerConfig.from_env()          <span class="cm"># or construct it directly</span>
+result = run_review(cfg)                 <span class="cm"># ReviewResult: verdict, findings,</span>
+                                         <span class="cm"># tiers run, budgets spent</span></code></pre>
+    <figcaption>Fig. 3 - the whole public API surface, more or less.</figcaption>
+  </figure>
+
+  <p>
+    Default review prompts ship in the package; point a config field at your
+    own markdown to replace them. Telemetry (OpenTelemetry traces of every
+    tier, tool call, and budget) is an opt-in extra, never a hard dependency.
+  </p>
+</section>
+
+</main>
+
+<footer class="colophon reveal">
+  <div class="masthead-rule" aria-hidden="true">
+    <span class="dot g"></span><span class="dot y"></span><span class="dot r"></span>
+  </div>
+  <p>
+    <strong>Status.</strong> Pre-release. cora was extracted from a private
+    GitOps deployment, where it reviews every PR in production. The package
+    is not yet published; watch the repo for v0.1.0.
+  </p>
+  <p>
+    <strong>Dogfood.</strong> Every PR to cora is reviewed by cora - with the
+    code from that PR's own checkout. It has blocked its own bugs.
+  </p>
+  <p class="fineprint">cora · imla.ch · this page is plain HTML and one stylesheet, ~0 JS</p>
+</footer>
+
+</body>
+</html>

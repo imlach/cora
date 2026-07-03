@@ -1,0 +1,41 @@
+name: ci
+
+# Runs cora's own test suite against the source tree (editable install),
+# on GitHub-hosted runners — cora is cluster-independent by design, so its
+# CI must not depend on any private infra. Matrix covers the requires-python
+# floor (3.11) and the current interpreter (3.13).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install (editable + dev deps)
+        run: pip install -e '.[dev,otel]'
+
+      - name: Test
+        run: pytest -q
