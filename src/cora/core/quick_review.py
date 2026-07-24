@@ -160,18 +160,20 @@ async def quick_review_call(
     except Exception as exc:  # noqa: BLE001
         print(f"::warning::pydantic-ai usage adapter failed: {exc}")
 
-    # Drain the `x-litellm-*` headers the httpx hook captured into
-    # the ContextVar during the call (see `litellm_capture.py`).
-    # `resolved_model` is the most-useful single header; full dict
-    # lands in `litellm_headers` for diagnostics.
+    # Resolve which engine actually served: `x-litellm-*` headers if the
+    # gateway emits them, else the response body's served-model name (see
+    # `litellm_capture.py`). Full header dict lands in `litellm_headers`
+    # for diagnostics.
     from cora.core.litellm_capture import (
         drain_captured_headers,
-        resolved_model_from,
+        resolve_backend_attribution,
     )
     captured = drain_captured_headers()
     budget.record_litellm_headers(captured)
     budget.set_resolved_model(
-        resolved_model_from(captured) or "unknown (no x-litellm-* headers)"
+        resolve_backend_attribution(
+            captured, result, fallback="unknown (no header or body model)"
+        )
     )
 
     # `result.output` is a string when `output_type=str` (the factory

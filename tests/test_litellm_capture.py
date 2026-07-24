@@ -1,6 +1,7 @@
-"""Unit tests for `agent_review.litellm_capture` — the httpx response
-event hook that surfaces `x-litellm-*` headers across pydantic-ai's
-Agent wrapper into `Budget.resolved_model`.
+"""Unit tests for `agent_review.litellm_capture` — backend attribution
+for the pydantic-ai agent path: the httpx response event hook that
+surfaces `x-litellm-*` headers, the response-body served-model reader,
+and the preference-ordered resolver that feeds `Budget.resolved_model`.
 
 Uses `httpx.MockTransport` so no network is required — drives the
 exact code path the production `OpenAIProvider(http_client=...)`
@@ -14,8 +15,10 @@ import httpx
 import pytest
 
 from cora.core.litellm_capture import (
+    body_model_from_result,
     build_capture_client,
     drain_captured_headers,
+    resolve_backend_attribution,
     resolved_model_from,
 )
 
@@ -187,3 +190,91 @@ def test_capture_visible_across_asyncio_task_boundary():
 )
 def test_resolved_model_from_picks_preferred_header(headers, expected):
     assert resolved_model_from(headers) == expected
+
+
+# --- response-body served-model attribution (aigw path, no headers) ---
+
+
+class _FakeMsg:
+    """Duck-type of a pydantic-ai message. `model_name=None` stands in for
+    a `ModelRequest` (which has no such attribute in practice)."""
+
+    def __init__(self, model_name: str | None):
+        self.model_name = model_name
+
+
+class _FakeResult:
+    """Duck-type of a pydantic-ai `AgentRunResult` — just `all_messages()`.
+    If `raises=True`, mimics a framework-shape surprise."""
+
+    def __init__(self, messages: list, *, raises: bool = False):
+        self._messages = messages
+        self._raises = raises
+
+    def all_messages(self) -> list:
+        if self._raises:
+            raise RuntimeError("framework shape changed")
+        return self._messages
+
+
+def test_body_model_reads_served_model_name():
+    """The response body's `model` field (pydantic-ai
+    `ModelResponse.model_name`) is the served-engine name."""
+    result = _FakeResult([_FakeMsg(None), _FakeMsg("forte")])
+    assert body_model_from_result(result) == "forte"
+
+
+def test_body_model_last_response_wins():
+    """Multi-turn deep review: last non-empty model_name wins
+    (last-write-wins, matching the header capture semantics)."""
+    result = _FakeResult(
+        [_FakeMsg(None), _FakeMsg("piano"), _FakeMsg(None), _FakeMsg("forte")]
+    )
+    assert body_model_from_result(result) == "forte"
+
+
+def test_body_model_none_when_absent():
+    """No message carries a model_name (e.g. request-only, or the
+    framework surfaced none) → None so the caller falls through."""
+    assert body_model_from_result(_FakeResult([_FakeMsg(None)])) is None
+    assert body_model_from_result(_FakeResult([])) is None
+    assert body_model_from_result(_FakeResult([_FakeMsg("   ")])) is None
+
+
+def test_body_model_best_effort_on_raise():
+    """A framework-shape surprise degrades to None, never raises —
+    attribution is best-effort and must not fail the review."""
+    assert body_model_from_result(_FakeResult([], raises=True)) is None
+
+
+def test_attribution_prefers_header_over_body():
+    """LiteLLM path: when `x-litellm-*` headers resolve, they win over
+    the body model (back-compat with the pre-aigw behaviour)."""
+    captured = {"x-litellm-model-id": "backend-b-explicit"}
+    result = _FakeResult([_FakeMsg("piano")])
+    assert (
+        resolve_backend_attribution(captured, result, fallback="unknown")
+        == "backend-b-explicit"
+    )
+
+
+def test_attribution_falls_back_to_body_model():
+    """aigw path: no `x-litellm-*` headers, so the body's served-model
+    name attributes the review (`review (forte)` in the footer)."""
+    result = _FakeResult([_FakeMsg("forte")])
+    assert (
+        resolve_backend_attribution({}, result, fallback="unknown")
+        == "forte"
+    )
+
+
+def test_attribution_fallback_when_neither():
+    """Neither headers nor a body model → the caller's `unknown (...)`
+    string, so attribution is honestly reported as unavailable."""
+    result = _FakeResult([_FakeMsg(None)])
+    assert (
+        resolve_backend_attribution(
+            {}, result, fallback="unknown (no header or body model)"
+        )
+        == "unknown (no header or body model)"
+    )
