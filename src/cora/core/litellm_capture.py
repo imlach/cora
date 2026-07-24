@@ -1,17 +1,25 @@
-"""LiteLLM response-header capture for the Pydantic-AI agent path.
+"""Backend attribution for the Pydantic-AI agent path.
 
-Pydantic-AI's `Agent` wraps an `openai.AsyncOpenAI` client and doesn't
-surface raw response headers, so the `Budget.resolved_model` chip
-(which concrete backend LiteLLM picked)
-lost its source when the reviewer cut over from the bespoke agent
-loop to pydantic-ai.
+Populates the `Budget.resolved_model` chip — the concrete engine that
+actually served the review, so a fallback-served review is
+distinguishable from a primary-served one. Two independent sources,
+preference-ordered by `resolve_backend_attribution`:
 
-This module restores it by attaching an httpx response event hook to
-a custom `httpx.AsyncClient` that the call sites then thread into
-`OpenAIProvider(http_client=...)`. The hook reads every `x-litellm-*`
-header off the response and stashes them in a module-level bucket;
-the call site drains the bucket after `agent.run()` and feeds it
-into Budget.
+1. `x-litellm-*` response headers (the LiteLLM path). Pydantic-AI's
+   `Agent` wraps an `openai.AsyncOpenAI` client and doesn't surface raw
+   response headers, so this module restores them via an httpx response
+   event hook threaded into `OpenAIProvider(http_client=...)`; the call
+   site drains the bucket after `agent.run()`. Harmless once the gateway
+   stops emitting `x-litellm-*` (drain returns `{}` → this source is
+   skipped).
+2. The completion response body's `model` field, read back off the
+   pydantic-ai result (`body_model_from_result`). Every OpenAI-shaped
+   completion carries the served-model name, so this survives a gateway
+   (Envoy AI Gateway v2) that emits no `x-litellm-*` headers at all.
+
+The header hook reads every `x-litellm-*` header off the response and
+stashes them in a module-level bucket; the call site drains the bucket
+after `agent.run()` and feeds it into Budget.
 
 Module-level (not ContextVar) is deliberate. Pydantic-AI dispatches
 the model request via `asyncio.create_task` (see
@@ -133,3 +141,52 @@ def resolved_model_from(headers: dict[str, str]) -> str | None:
         return host
 
     return model_id or None
+
+
+def body_model_from_result(result) -> str | None:
+    """Served-model name from the completion response body, or `None`.
+
+    Pydantic-AI stamps each `ModelResponse.model_name` from the OpenAI
+    response body's `model` field (`OpenAIChatModel` sets
+    `model_name=response.model`). End-to-end through the gateway that's
+    the serving engine's `--served-model-name` (e.g. `piano` / `forte`),
+    so it attributes the review even when the gateway emits no
+    `x-litellm-*` headers — the case after the Envoy AI Gateway cutover.
+
+    Returns the last non-empty `model_name` across the run's messages
+    (last-write-wins, matching `Budget.resolved_model`'s final-turn
+    semantics), or `None` if the framework surfaced none. Duck-typed —
+    reads `.model_name` off each message, so a `ModelRequest` (no such
+    attr) is skipped and no pydantic-ai import is needed. Best-effort:
+    any framework-shape surprise degrades to `None`, never raises."""
+    try:
+        messages = result.all_messages()
+    except Exception:  # noqa: BLE001 — best-effort attribution only
+        return None
+    model_name: str | None = None
+    for msg in messages:
+        name = getattr(msg, "model_name", None)
+        if isinstance(name, str) and name.strip():
+            model_name = name.strip()
+    return model_name
+
+
+def resolve_backend_attribution(
+    captured: dict[str, str],
+    result,
+    *,
+    fallback: str,
+) -> str:
+    """Preference-ordered backend identity for the `resolved_model` chip.
+
+    1. `x-litellm-*` response headers (`resolved_model_from`) — LiteLLM
+       path; back-compat, harmless once the gateway stops emitting them.
+    2. The response body's `model` field (`body_model_from_result`) — the
+       served-model name, works through Envoy AI Gateway v2.
+    3. `fallback` — the caller's `unknown (...)` string when neither
+       source resolved (attribution genuinely unavailable)."""
+    return (
+        resolved_model_from(captured)
+        or body_model_from_result(result)
+        or fallback
+    )

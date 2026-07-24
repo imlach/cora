@@ -517,13 +517,16 @@ async def continue_on_t1(
 
     from cora.core.litellm_capture import (
         drain_captured_headers,
-        resolved_model_from,
+        resolve_backend_attribution,
     )
     captured = drain_captured_headers()
     budget.record_litellm_headers(captured)
     budget.set_resolved_model(
-        resolved_model_from(captured)
-        or f"unknown (T1 on {t1_model_alias}, no x-litellm-* headers)"
+        resolve_backend_attribution(
+            captured,
+            result,
+            fallback=f"unknown (T1 on {t1_model_alias}, no header or body model)",
+        )
     )
 
     body = result.output if isinstance(result.output, str) else str(result.output)

@@ -737,12 +737,14 @@ async def deep_review_call(
 
     from cora.core.litellm_capture import (
         drain_captured_headers,
-        resolved_model_from,
+        resolve_backend_attribution,
     )
     captured = drain_captured_headers()
     budget.record_litellm_headers(captured)
     budget.set_resolved_model(
-        resolved_model_from(captured) or "unknown (no x-litellm-* headers)"
+        resolve_backend_attribution(
+            captured, result, fallback="unknown (no header or body model)"
+        )
     )
 
     body = result.output if isinstance(result.output, str) else str(result.output)

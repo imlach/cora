@@ -8,6 +8,13 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Fixed
+- Backend attribution now resolves the served-model name from the
+  completion response body (`ModelResponse.model_name`) when the gateway
+  emits no `x-litellm-*` headers, so the review footer reads
+  `endpoint: review (forte)` instead of `endpoint: review (unknown …)`.
+  Header-based resolution is still preferred when present (back-compat).
+
 ## [0.1.0] - 2026-07-03
 
 First public release. cora's development history predates this
