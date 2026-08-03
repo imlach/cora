@@ -58,3 +58,5 @@ def test_deep_prompt_pins_unverified_finding_rules():
     text = load_system_prompt(None, mode="deep")
     assert "A conditional is not a finding" in text
     assert "Check it isn't already there" in text
+    assert "Validate any claim" in text
+    assert "≤2 tool calls" not in text

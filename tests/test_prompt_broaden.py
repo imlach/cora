@@ -1,7 +1,9 @@
-"""The broaden_tools prompt variant (teacher-trajectory mode).
+"""The tools-available task framing (validate-any-claim grounding).
 
-Asserts the opt-in variant swaps the production "≤2 tool calls" nudge
-for full-palette encouragement, and that the default is unchanged.
+Grounding is the default now — the old "≤2 tool calls" nudge trained
+production reviews down to 82% zero-tool-call verdicts. The former
+REVIEWER_BROADEN_TOOLS teacher-trajectory variant IS the default
+framing, and the flag is accepted as a no-op for env compat.
 """
 
 from __future__ import annotations
@@ -26,16 +28,10 @@ def _prompt(**kw):
     )
 
 
-def test_default_keeps_two_call_cap():
+def test_default_grounds_every_claim():
     p = _prompt()
-    assert "Aim for ≤2 tool calls" in p
-    assert "GROUND every finding with a tool" not in p
-
-
-def test_broaden_swaps_to_full_palette():
-    p = _prompt(broaden_tools=True)
+    assert "validate ANY claim" in p
     assert "Aim for ≤2 tool calls" not in p
-    assert "GROUND every finding with a tool" in p
     # encourages the underused knowledge / web tools by name
     for tool in ("read_decision", "search_cluster_docs", "web_fetch_doc"):
         assert tool in p
@@ -43,8 +39,12 @@ def test_broaden_swaps_to_full_palette():
     assert "parallel tool calls" in p
 
 
-def test_broaden_ignored_without_tools():
-    # quick mode (tools_available=False) never gets the broaden framing
+def test_broaden_flag_is_a_noop():
+    assert _prompt(broaden_tools=True) == _prompt()
+
+
+def test_no_tools_framing_untouched():
+    # quick mode (tools_available=False) gets no grounding framing
     p = _prompt(tools_available=False, broaden_tools=True)
-    assert "GROUND every finding with a tool" not in p
+    assert "validate ANY claim" not in p
     assert "Produce the markdown review" in p

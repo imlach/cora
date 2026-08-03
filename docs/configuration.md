@@ -97,7 +97,7 @@ Deep review can attach MCP servers and expose tool subsets.
 | `MCP_ACTIONS_URL` | Actions MCP server URL |
 | `MCP_ACTIONS_TOKEN` | Token for the actions MCP server |
 | `WEB_FETCH_GATE_URL` | Fetch-gate endpoint for controlled web context |
-| `REVIEWER_BROADEN_TOOLS` | Broadens the default tool exposure when set to `true` |
+| `REVIEWER_BROADEN_TOOLS` | No-op (accepted for compatibility) — the validate-any-claim tool framing is the default now |
 
 ## Reporting And Write Paths
 

@@ -14,6 +14,15 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   as an unresolved conditional ("if X isn't guarded, this crashes" with
   no tool call to resolve X), and recommending a change the diff already
   implements. Both are pinned by `tests/test_prompts.py`.
+- **Tool grounding is the default.** The deep prompt and the assembled
+  task framing no longer carry the "≤2 tool calls" nudge (production
+  data: 82% of clean deep verdicts were zero-tool-call under it) —
+  reviewers are now told to validate ANY claim with a tool call or a
+  quoted hunk, with parallel batching (not a call cap) bounding wall
+  time. The former `REVIEWER_BROADEN_TOOLS` teacher-trajectory variant
+  is this framing, so the flag is now an accepted no-op. Deployments
+  that relied on the low-call cost profile should expect more tool
+  traffic per deep review.
 
 ### Fixed
 - `tier_verdict` events now attribute the posted body to T1 for **all**
