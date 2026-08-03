@@ -409,12 +409,11 @@ async def produce_output(run: ReviewRun) -> ReviewResult | None:  # noqa: PLR091
     # Tier-verdict plumbing — emit a `tier_verdict` event per tier that
     # ran. T0 always; T1 when continuation fired; T2 when it produced.
     if not run.is_quick:
+        from cora.core.kv_continuation import T1_TERMINATED_REASONS
         from cora.core.loop_logging import log_tier_verdict
 
         primary_tier = (
-            "T1"
-            if terminated_reason in ("t1-continuation", "t1-classifier-large")
-            else "T0"
+            "T1" if terminated_reason in T1_TERMINATED_REASONS else "T0"
         )
         log_tier_verdict(
             pr_number=pr_number,
