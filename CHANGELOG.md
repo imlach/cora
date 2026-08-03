@@ -8,7 +8,21 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Changed
+- The packaged deep prompt's "Verify before you flag" section now names
+  two failure shapes observed in production reviews: a Blocker phrased
+  as an unresolved conditional ("if X isn't guarded, this crashes" with
+  no tool call to resolve X), and recommending a change the diff already
+  implements. Both are pinned by `tests/test_prompts.py`.
+
 ### Fixed
+- `tier_verdict` events now attribute the posted body to T1 for **all**
+  T1 entry paths: the hand-picked reason tuple missed
+  `t1-verdict-trigger` (blocker / low-confidence escalation) and
+  `t1-per-call-retry` (fresh T1 restart), mislabelling those verdicts as
+  T0 in the structured log stream. Tier attribution now uses
+  `kv_continuation.T1_TERMINATED_REASONS`, which tracks the entry-path
+  map by construction.
 - Backend attribution now resolves the served-model name from the
   completion response body (`ModelResponse.model_name`) when the gateway
   emits no `x-litellm-*` headers, so the review footer reads

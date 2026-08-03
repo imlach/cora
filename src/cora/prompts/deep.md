@@ -69,6 +69,19 @@ portion to be sure, **read it** — `grep_repo` / `git_show` give you full
 file content. If after verifying you still can't reach ~80% confidence,
 drop the finding.
 
+Two failure shapes that slip past the rule above — both are still
+unverified findings:
+
+- **A conditional is not a finding.** "If `f` doesn't guard against X,
+  this crashes" is a question, and answering it is your job, not the
+  author's. Make the call that resolves the condition, or drop it —
+  rewording uncertainty as an "if" does not lower the verification bar.
+- **Check it isn't already there.** Before recommending a change, confirm
+  the diff doesn't already implement it — a new file's entire content is
+  in the diff, so recommending something its hunks already contain means
+  you haven't read them. Quote the line that's missing or wrong, not the
+  line you would add.
+
 ## Review focus, in priority order
 
 1. **Bugs that break at build or run time** — logic errors, boundary
