@@ -43,6 +43,12 @@ _T1_SUCCESS_REASON = {
     "verdict_trigger": "t1-verdict-trigger",
 }
 
+# Every `terminated_reason` that means "the posted body came from T1" —
+# consumers deciding tier attribution (e.g. the `tier_verdict` event)
+# must use this set, not a hand-picked subset that drifts when a new
+# entry path is added.
+T1_TERMINATED_REASONS = frozenset(_T1_SUCCESS_REASON.values())
+
 
 class KvContinuationConnector(EscalationConnector):
     """Deep-mode default: continue T0's trajectory on T1.

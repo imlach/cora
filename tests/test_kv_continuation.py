@@ -327,3 +327,19 @@ def test_wall_hit_keeps_default_resume_framing(monkeypatch):
 
     asyncio.run(KvContinuationConnector().escalate(ctx, _never))
     assert t1_kwargs["resume_prompt"] is None
+
+
+def test_t1_terminated_reasons_covers_every_entry_path():
+    """`T1_TERMINATED_REASONS` is the tier-attribution set consumers use
+    (e.g. the `tier_verdict` event's T0/T1 label). It must track
+    `_T1_SUCCESS_REASON` exactly — a hand-picked subset mislabelled
+    `t1-verdict-trigger` / `t1-per-call-retry` bodies as T0 in the
+    structured log stream."""
+    from cora.core.kv_continuation import (
+        _T1_SUCCESS_REASON,
+        T1_TERMINATED_REASONS,
+    )
+
+    assert T1_TERMINATED_REASONS == frozenset(_T1_SUCCESS_REASON.values())
+    assert "t1-verdict-trigger" in T1_TERMINATED_REASONS
+    assert "t1-per-call-retry" in T1_TERMINATED_REASONS

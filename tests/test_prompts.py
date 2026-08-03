@@ -47,3 +47,16 @@ def test_config_prompt_paths_default_to_none():
     cfg = ReviewerConfig()
     assert cfg.deep_prompt_path is None
     assert cfg.quick_prompt_path is None
+
+
+def test_deep_prompt_pins_unverified_finding_rules():
+    """The two production-observed escape hatches around "Verify before
+    you flag" — a blocker phrased as an unresolved conditional, and a
+    recommendation the diff already implements — are called out
+    explicitly. Pin the headline phrases so a prompt edit that drops
+    them trips CI."""
+    text = load_system_prompt(None, mode="deep")
+    assert "A conditional is not a finding" in text
+    assert "Check it isn't already there" in text
+    assert "Validate any claim" in text
+    assert "≤2 tool calls" not in text

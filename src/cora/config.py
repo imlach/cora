@@ -210,6 +210,9 @@ class ReviewerConfig:
 
     # ── Feature flags / dev knobs ────────────────────────────────────
     enable_thinking: bool = False
+    # No-op since the validate-any-claim framing became the prompt
+    # default (it was this flag's teacher-trajectory variant). Accepted
+    # so existing REVIEWER_BROADEN_TOOLS deployments keep working.
     broaden_tools: bool = False
     per_call_timeout_s: float | None = None
     transcript_dir: str | None = None

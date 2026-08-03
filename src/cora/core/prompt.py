@@ -140,42 +140,29 @@ def assemble_initial_user_prompt(
     # the reviewer reads them while the changed code is fresh.
     if ci_context:
         parts += ["", ci_context]
-    if tools_available and broaden_tools:
-        # Teacher-trajectory variant (for capturing training data):
-        # deliberately encourages the FULL tool palette so the captured
-        # transcripts demonstrate broad, load-bearing tool use for a
-        # student model to imitate — the opposite nudge from the default
-        # "≤2 tool calls" framing below. Opt-in via REVIEWER_BROADEN_TOOLS;
-        # never the live default.
+    if tools_available:
+        # Grounding is the default framing (was the opt-in
+        # REVIEWER_BROADEN_TOOLS teacher-trajectory variant; the old
+        # "≤2 tool calls" default trained production reviews down to
+        # 82% zero-tool-call verdicts — the parallel-batching nudge, not
+        # a call cap, is what bounds wall time). `broaden_tools` is
+        # accepted as a no-op for env compat.
         parts += [
             "",
             "## Your task",
             "",
-            "Review this PR, and GROUND every finding with a tool — don't "
-            "rely on the diff or your priors alone. Verify code under "
-            "review with `grep_repo` / `git_show`; when the diff touches a "
-            "documented decision or convention, confirm it with "
-            "`read_decision` / `read_note` / `search_cluster_docs` / "
-            "`search_knowledge`; for a dependency bump, pull the upstream "
-            "facts with `web_fetch_doc`. Prefer issuing independent "
-            "lookups together in one turn (parallel tool calls) over "
-            "serializing them. Then produce the markdown review per the "
-            "system prompt's output format.",
-        ]
-    elif tools_available:
-        parts += [
-            "",
-            "## Your task",
-            "",
-            "Review this PR. The retrieved-context section above already "
-            "carries the most-relevant DECs / notes / AGENTS sections for "
-            "this diff — use your tools only when something the diff "
-            "implies isn't covered there (verify a specific file via "
-            "`grep_repo`, follow a sibling-commit pointer via `git_show`, "
-            "etc.). Aim for ≤2 tool calls. When the diff obviously needs "
-            "multiple lookups, issue them in a single turn — don't "
-            "serialize. Then produce the markdown review per the system "
-            "prompt's output format.",
+            "Review this PR, and use your tools to validate ANY claim "
+            "you are about to make — don't rely on the diff or your "
+            "priors alone. Verify code under review with `grep_repo` / "
+            "`git_show`; when the diff touches a documented decision or "
+            "convention, confirm it with `read_decision` / `read_note` / "
+            "`search_cluster_docs` / `search_knowledge`; for a "
+            "dependency bump, pull the upstream facts with "
+            "`web_fetch_doc`. A claim you did not validate with a tool "
+            "call or a quoted hunk does not go in the review. Prefer "
+            "issuing independent lookups together in one turn (parallel "
+            "tool calls) over serializing them. Then produce the "
+            "markdown review per the system prompt's output format.",
         ]
     else:
         parts += [

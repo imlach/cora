@@ -8,7 +8,30 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Changed
+- The packaged deep prompt's "Verify before you flag" section now names
+  two failure shapes observed in production reviews: a Blocker phrased
+  as an unresolved conditional ("if X isn't guarded, this crashes" with
+  no tool call to resolve X), and recommending a change the diff already
+  implements. Both are pinned by `tests/test_prompts.py`.
+- **Tool grounding is the default.** The deep prompt and the assembled
+  task framing no longer carry the "≤2 tool calls" nudge (production
+  data: 82% of clean deep verdicts were zero-tool-call under it) —
+  reviewers are now told to validate ANY claim with a tool call or a
+  quoted hunk, with parallel batching (not a call cap) bounding wall
+  time. The former `REVIEWER_BROADEN_TOOLS` teacher-trajectory variant
+  is this framing, so the flag is now an accepted no-op. Deployments
+  that relied on the low-call cost profile should expect more tool
+  traffic per deep review.
+
 ### Fixed
+- `tier_verdict` events now attribute the posted body to T1 for **all**
+  T1 entry paths: the hand-picked reason tuple missed
+  `t1-verdict-trigger` (blocker / low-confidence escalation) and
+  `t1-per-call-retry` (fresh T1 restart), mislabelling those verdicts as
+  T0 in the structured log stream. Tier attribution now uses
+  `kv_continuation.T1_TERMINATED_REASONS`, which tracks the entry-path
+  map by construction.
 - Backend attribution now resolves the served-model name from the
   completion response body (`ModelResponse.model_name`) when the gateway
   emits no `x-litellm-*` headers, so the review footer reads
