@@ -8,6 +8,8 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-03
+
 ### Changed
 - The packaged deep prompt's "Verify before you flag" section now names
   two failure shapes observed in production reviews: a Blocker phrased
