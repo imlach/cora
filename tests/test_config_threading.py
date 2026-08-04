@@ -68,13 +68,32 @@ def test_quick_output_cap_is_larger_than_deep_per_call_cap():
     assert cfg.quick_max_output_tokens > cfg.max_output_tokens
 
 
-def test_deep_per_call_cap_sized_for_reasoning():
-    # Deep mode's per-call cap (both T0 and T1 legs) must exceed the
-    # old 16K cap a reasoning model blew on a single turn — it spent
-    # the whole budget in <think> and the loop errored.
+def test_deep_per_call_cap_is_reachable_inside_the_per_call_timeout():
+    # The deep per-call cap (both T0 and T1 legs) is sized against the
+    # per-call TIMEOUT, not the context window: a draw that can't finish
+    # inside the timeout is cancelled mid-generation and records nothing
+    # — no usage, no finish_reason, invisible in every latency histogram.
+    # Bounded, the same episode ends as `finish=length` data the loop can
+    # act on. 100 tok/s is a deliberately conservative rate floor.
+    from cora.core.budget import PER_CALL_TIMEOUT_S
+
     cfg = ReviewerConfig()
     assert cfg.deep_max_output_tokens == c.DEEP_MAX_OUTPUT_TOKENS
-    assert cfg.deep_max_output_tokens > 16_000
+    slowest_tokens_per_s = 100
+    assert cfg.deep_max_output_tokens / slowest_tokens_per_s < PER_CALL_TIMEOUT_S
+
+
+def test_max_completion_tokens_env_overrides_deep_cap():
+    cfg = ReviewerConfig.from_env({"AGENT_REVIEW_MAX_COMPLETION_TOKENS": "9000"})
+    assert cfg.deep_max_output_tokens == 9_000
+    # Unset / empty falls back to the engine constant.
+    assert ReviewerConfig.from_env({}).deep_max_output_tokens == c.DEEP_MAX_OUTPUT_TOKENS
+    assert (
+        ReviewerConfig.from_env(
+            {"AGENT_REVIEW_MAX_COMPLETION_TOKENS": ""}
+        ).deep_max_output_tokens
+        == c.DEEP_MAX_OUTPUT_TOKENS
+    )
 
 
 # ── Thinking toggle (deep mode) ──────────────────────────────────────

@@ -91,8 +91,10 @@ class ReviewerConfig:
     # turn (see `core.config.QUICK_MAX_OUTPUT_TOKENS`).
     quick_max_output_tokens: int = _c.QUICK_MAX_OUTPUT_TOKENS
     # Deep mode's per-call cap — each agent-loop turn must fit the model's
-    # reasoning trace plus its text/tool-call (see
-    # `core.config.DEEP_MAX_OUTPUT_TOKENS`). Used by both the T0 and T1 legs.
+    # reasoning trace plus its text/tool-call, and must be reachable inside
+    # `per_call_timeout_s` at the deployment's generation rate (see
+    # `core.config.DEEP_MAX_OUTPUT_TOKENS`). Used by both the T0 and T1 legs;
+    # env knob is `AGENT_REVIEW_MAX_COMPLETION_TOKENS`.
     deep_max_output_tokens: int = _c.DEEP_MAX_OUTPUT_TOKENS
     # ── Spiral recovery (reasoning-spiral restart) ───────────────────
     # When a reasoning-model turn spends its whole output budget inside
@@ -326,6 +328,12 @@ class ReviewerConfig:
             eval_output_dir=get("AGENT_REVIEW_EVAL_OUTPUT_DIR"),
             loop_guard_bot_login=get("AGENT_REVIEW_LOOP_GUARD_BOT_LOGIN"),
             max_tool_iterations=getint("MAX_TOOL_ITERATIONS", _c.DEFAULT_MAX_TOOL_ITERATIONS),
+            # Per-call completion ceiling for the tier (deep) legs. Sized
+            # against `per_call_timeout_s`, not against the context window —
+            # see `_c.DEEP_MAX_OUTPUT_TOKENS`.
+            deep_max_output_tokens=getint(
+                "AGENT_REVIEW_MAX_COMPLETION_TOKENS", _c.DEEP_MAX_OUTPUT_TOKENS
+            ),
             # Spiral recovery — default-false gate (only the literal
             # "true" enables); the bounds tolerate empty →
             # engine default. Unset keeps the default soft-fail.

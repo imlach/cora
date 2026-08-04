@@ -230,17 +230,26 @@ MAX_OUTPUT_TOKENS = 16_000
 # deep gets DEEP_MAX_OUTPUT_TOKENS below. Well within the review chain's
 # typical context windows (e.g. 80K–256K).
 QUICK_MAX_OUTPUT_TOKENS = 32_000
-# Deep mode's PER-CALL output cap (each agent-loop turn). Same failure mode
-# as quick — a turn that spends its whole budget in `<think>` finishes
-# `finish_reason=length` with thinking only, pydantic-ai raises, and the
-# deep loop errors out. This cap has climbed 8K → 16K →
-# 32K as the review model's reasoning grew: the review reasoning model blew
-# the whole 16K on turn-1 thinking of a substantive PR. 32K is a safe
-# ceiling on an 80K-context T0 backend across a multi-turn loop (input
-# grows ~2-3K/turn); a larger-context T1 endpoint (e.g. 256K) has ample
-# room. Used by BOTH the T0
-# (deep_review.py) and T1 (continuation.py) legs.
-DEEP_MAX_OUTPUT_TOKENS = 32_000
+# Deep mode's PER-CALL output cap (each agent-loop turn), used by BOTH the
+# T0 (deep_review.py) and T1 (continuation.py) legs. Env-overridable as
+# `AGENT_REVIEW_MAX_COMPLETION_TOKENS`.
+#
+# The cap's job is NOT to be generous — it is to keep a single completion
+# strictly inside `per_call_timeout_s` by construction, so that a turn which
+# spends its whole budget thinking ends as `finish_reason=length` DATA the
+# loop can act on, instead of a call cancelled mid-generation that records
+# nothing. Observed serving behaviour makes the arithmetic concrete: a
+# reasoning model generating at ~110-125 tok/s on a non-streaming call needs
+# ~95-110s to reach 12K tokens and ~260-290s to reach 32K. Against the
+# reference 180s per-call cap the old 32K ceiling was unreachable — every
+# extended-thinking episode was discarded by the timeout while it was still
+# generating, invisible in every latency histogram because a cancelled
+# request records no usage, no TTFT and no finish_reason.
+#
+# So the history reads 8K → 16K → 32K (chasing a reasoning model that kept
+# growing) → 12K (bounding the draw instead). Raising this again without
+# also raising `per_call_timeout_s` re-opens the invisible-loss window.
+DEEP_MAX_OUTPUT_TOKENS = 12_000
 
 # ── Spiral recovery ────────────────────────────────────────────────
 # Reasoning-spiral recovery for the `review` reasoning model.

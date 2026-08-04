@@ -368,8 +368,9 @@ async def continue_on_t1(
                 message_history=message_history_arg,
                 deps=deps,
                 model_settings=ModelSettings(
-                    # Same per-call cap as T0 (deep_review.py): fit the
-                    # model's reasoning trace plus the turn's output.
+                    # Same per-call cap as T0 (deep_review.py): fits the
+                    # reasoning trace plus the turn's output, and stays
+                    # reachable inside `per_call_timeout_s`.
                     # See `_c.DEEP_MAX_OUTPUT_TOKENS`.
                     max_tokens=(
                         cfg.deep_max_output_tokens

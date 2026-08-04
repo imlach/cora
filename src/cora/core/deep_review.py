@@ -468,18 +468,14 @@ async def deep_review_call(
                 initial_user_prompt,
                 deps=deps,
                 model_settings=ModelSettings(
-                    # Per-call output budget — must absorb the model's
-                    # `<think>...</think>` reasoning block AND leave room for
-                    # the turn's text / tool-call. Pydantic-AI raises
-                    # `UnexpectedModelBehavior` when a turn finishes with
-                    # `finish_reason='length'` and only thinking parts came
-                    # back (`_agent_graph.py` L1104). This cap has climbed
-                    # 8k → 16k → `DEEP_MAX_OUTPUT_TOKENS` as the review model's
-                    # reasoning grew — the review reasoning model blew the whole
-                    # 16k on turn 1 of a substantive PR.
+                    # Per-call output budget — absorbs the model's
+                    # `<think>...</think>` block AND the turn's text /
+                    # tool-call, bounded so one draw always finishes inside
+                    # `per_call_timeout_s` (see `_c.DEEP_MAX_OUTPUT_TOKENS`).
+                    # An over-long draw therefore ends as `finish_reason=
+                    # 'length'` — a signal the loop re-draws on — instead of
+                    # a call the timeout discards mid-generation.
                     # Config-threaded; T1 (continuation.py) uses the same cap.
-                    # Fits the review chain's typical context windows
-                    # (e.g. 80k T0, 256k T1).
                     max_tokens=deep_max_tokens,
                     temperature=0.2,
                     timeout=timeout_s,
