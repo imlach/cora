@@ -79,6 +79,19 @@ def _last_model_response(messages: Iterable[Any]) -> Any | None:
     return last
 
 
+def has_model_response(messages: Iterable[Any]) -> bool:
+    """True iff the captured history contains at least one
+    `ModelResponse` — i.e. the model answered at least once.
+
+    This is the emptiness test that means "did this tier get anywhere".
+    `not messages` is NOT: pydantic-ai appends the outgoing
+    `ModelRequest` to the history *before* awaiting the model
+    (`_agent_graph.ModelRequestNode.run`), so even a first-call timeout
+    leaves a one-element history behind and any `not messages` guard is
+    dead code that silently never fires."""
+    return _last_model_response(messages) is not None
+
+
 def is_reasoning_spiral(messages: Iterable[Any]) -> bool:
     """True iff the last `ModelResponse` is thinking-only.
 

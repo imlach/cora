@@ -84,6 +84,24 @@ def test_committed_prefix_drops_only_a_trailing_response():
     assert committed_prefix(None) == []
 
 
+def test_has_model_response_is_the_real_did_this_tier_get_anywhere_test():
+    """The `per_call_fresh_start` predicate. pydantic-ai appends the
+    outgoing request BEFORE awaiting the model, so a history from a
+    first-call timeout is `[ModelRequest]` — non-empty. Any `not
+    messages` guard over it is dead code, which is what the T1 fresh-
+    start entry was built on."""
+    from pydantic_ai.messages import ModelRequest, TextPart, UserPromptPart
+
+    from cora.core.spiral import has_model_response
+
+    first_call_timeout = [ModelRequest(parts=[UserPromptPart(content="review")])]
+    assert first_call_timeout  # the trap: truthy
+    assert has_model_response(first_call_timeout) is False
+
+    assert has_model_response([]) is False
+    assert has_model_response(_history(final_parts=[TextPart(content="hi")])) is True
+
+
 def test_extract_final_text_salvages_prose_but_not_reasoning():
     from pydantic_ai.messages import TextPart, ThinkingPart
 
