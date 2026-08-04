@@ -234,22 +234,45 @@ QUICK_MAX_OUTPUT_TOKENS = 32_000
 # T0 (deep_review.py) and T1 (continuation.py) legs. Env-overridable as
 # `AGENT_REVIEW_MAX_COMPLETION_TOKENS`.
 #
-# The cap's job is NOT to be generous — it is to keep a single completion
-# strictly inside `per_call_timeout_s` by construction, so that a turn which
-# spends its whole budget thinking ends as `finish_reason=length` DATA the
-# loop can act on, instead of a call cancelled mid-generation that records
-# nothing. Observed serving behaviour makes the arithmetic concrete: a
-# reasoning model generating at ~110-125 tok/s on a non-streaming call needs
-# ~95-110s to reach 12K tokens and ~260-290s to reach 32K. Against the
-# reference 180s per-call cap the old 32K ceiling was unreachable — every
-# extended-thinking episode was discarded by the timeout while it was still
-# generating, invisible in every latency histogram because a cancelled
-# request records no usage, no TTFT and no finish_reason.
+# The cap's job is to keep a single completion reachable inside
+# `per_call_timeout_s` by construction, so a turn that spends its whole
+# budget thinking ends as `finish_reason=length` DATA the loop can act on
+# instead of a call cancelled mid-generation that records nothing.
 #
-# So the history reads 8K → 16K → 32K (chasing a reasoning model that kept
-# growing) → 12K (bounding the draw instead). Raising this again without
-# also raising `per_call_timeout_s` re-opens the invisible-loss window.
-DEEP_MAX_OUTPUT_TOKENS = 12_000
+# It is bounded on BOTH sides, and getting either wrong is a real failure:
+#
+#   floor — must exceed the longest SUCCESSFUL completion, or the cap
+#     truncates real reviews. Observed max on a 30-day window: ~16K output
+#     tokens on a turn that finished normally.
+#   ceiling — must be reachable inside the per-call timeout at the
+#     deployment's generation rate. At the low end of the observed range
+#     (~110 tok/s) the 180s default reaches ~19.8K; 32K would need
+#     ~290s.
+#
+# So on this reference deployment the whole legal window is roughly
+# 16K-19.8K — under 4K wide. 18K sits in it with margin on both sides.
+# That narrowness is itself the finding: the raised per-call timeout the
+# deployment runs is not optional generosity, it is what gives the window
+# any room at all. Re-derive both numbers together, never one alone.
+#
+# The old 32K was chosen against the CONTEXT WINDOW rather than the
+# timeout, which made it unreachable: every extended-thinking episode was
+# discarded by the timeout while it was still generating, invisible in
+# every latency histogram because a cancelled request records no usage, no
+# TTFT and no finish_reason.
+#
+# Do not read this as "smaller is safer". A ceiling below the floor trades
+# invisible timeouts for constant re-draws, doubling the call cost of
+# ordinary long turns — and the re-draw is bounded by the same ceiling, so
+# it can lose the same way. Observed evidence that a low ceiling is not
+# self-correcting: a bounded 12K recovery turn, explicitly told the analysis
+# was already done and to keep further reasoning brief, still spent all 12K
+# inside `<think>` and emitted no text at all.
+#
+# Raising it without also raising `per_call_timeout_s` re-opens the
+# invisible-loss window; lowering it below the floor starts cutting off
+# reviews that would have succeeded.
+DEEP_MAX_OUTPUT_TOKENS = 18_000
 
 # ── Uncommitted-draw re-draw ───────────────────────────────────────
 # A turn that hits `DEEP_MAX_OUTPUT_TOKENS` with no tool call and no
@@ -289,9 +312,19 @@ STREAM_DETECTION_ENABLED = False
 STALL_TIMEOUT_S = 30
 # Reasoning deltas one turn may stream before it must have committed to
 # text or a tool call. Below `DEEP_MAX_OUTPUT_TOKENS` so the abort fires
-# before the ceiling does — the point is to stop paying for a spiral,
-# not to observe one land.
-THINKING_BUDGET_TOKENS = 10_000
+# before the ceiling does — the point is to stop paying for a spiral, not
+# to observe one land — but above the reasoning a legitimate turn is known
+# to spend, or it aborts good turns. Observed legitimate reasoning reaches
+# ~15K tokens (58,740 chars on one run of a PR that completed), so a 10K
+# budget would have cut those off.
+#
+# Be honest about what that leaves: with the ceiling at 18K, a budget that
+# clears known-good reasoning can only fire marginally before the ceiling
+# would have. On this model the early-abort value of streaming is on the
+# STALL side, not the spiral side — a stall is caught in 30s, where the
+# ceiling would take minutes. Tune this down only with evidence from your
+# own deployment that its legitimate reasoning is shorter.
+THINKING_BUDGET_TOKENS = 16_000
 # Last resort after a payload has spiralled TWICE: one bounded commit
 # turn with reasoning mechanically off, via
 # `chat_template_kwargs={"enable_thinking": false}`. Verified against

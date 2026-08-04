@@ -68,19 +68,27 @@ def test_quick_output_cap_is_larger_than_deep_per_call_cap():
     assert cfg.quick_max_output_tokens > cfg.max_output_tokens
 
 
-def test_deep_per_call_cap_is_reachable_inside_the_per_call_timeout():
+def test_deep_per_call_cap_is_bounded_on_both_sides():
     # The deep per-call cap (both T0 and T1 legs) is sized against the
-    # per-call TIMEOUT, not the context window: a draw that can't finish
-    # inside the timeout is cancelled mid-generation and records nothing
-    # — no usage, no finish_reason, invisible in every latency histogram.
-    # Bounded, the same episode ends as `finish=length` data the loop can
-    # act on. 100 tok/s is a deliberately conservative rate floor.
+    # per-call TIMEOUT, not the context window — but it is bounded below
+    # too, and getting either side wrong is a real failure.
     from cora.core.budget import PER_CALL_TIMEOUT_S
 
     cfg = ReviewerConfig()
     assert cfg.deep_max_output_tokens == c.DEEP_MAX_OUTPUT_TOKENS
-    slowest_tokens_per_s = 100
-    assert cfg.deep_max_output_tokens / slowest_tokens_per_s < PER_CALL_TIMEOUT_S
+
+    # Ceiling: a draw that can't finish inside the timeout is cancelled
+    # mid-generation and records nothing — no usage, no finish_reason,
+    # invisible in every latency histogram. 110 tok/s is the low end of
+    # the observed generation range.
+    slowest_observed_tokens_per_s = 110
+    assert cfg.deep_max_output_tokens / slowest_observed_tokens_per_s < PER_CALL_TIMEOUT_S
+
+    # Floor: must clear the longest completion observed to SUCCEED, or
+    # the cap truncates real reviews and every long turn pays for a
+    # re-draw it didn't need.
+    longest_successful_completion_tokens = 16_000
+    assert cfg.deep_max_output_tokens > longest_successful_completion_tokens
 
 
 def test_max_completion_tokens_env_overrides_deep_cap():

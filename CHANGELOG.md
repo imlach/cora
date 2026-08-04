@@ -16,7 +16,7 @@ verdict is now a signal the loop acts on, instead of a call the per-call
 timeout discards while it is still generating.
 
 ### Changed
-- **The deep per-call completion ceiling drops 32K → 12K**, and is now
+- **The deep per-call completion ceiling drops 32K → 18K**, and is now
   env-settable as `AGENT_REVIEW_MAX_COMPLETION_TOKENS`. It is sized
   against `AGENT_REVIEW_PER_CALL_TIMEOUT_S`, not against the context
   window: at observed serving rates a 32K draw cannot finish inside a
@@ -24,11 +24,18 @@ timeout discards while it is still generating.
   and a cancelled request records no usage, no TTFT and no
   `finish_reason`, which made the whole affected population invisible in
   every latency histogram. Bounded, the same episode ends as
-  `finish_reason=length` data. **Deployments on a slower backend, or with
-  a raised per-call timeout, should re-derive this from their own
-  generation rate rather than inherit 12K.** Quick mode keeps its own
-  32K ceiling (single-shot: reasoning and the full verdict must fit one
-  call).
+  `finish_reason=length` data.
+
+  The ceiling is bounded on **both** sides and the two must be derived
+  together. Below the longest completion observed to succeed (~16K) it
+  truncates real reviews and makes every long turn pay for a re-draw it
+  didn't need; above `timeout × generation rate` it is unreachable and
+  the original failure returns. On the reference deployment that legal
+  window is roughly 16K–19.8K — under 4K wide, which is why a raised
+  per-call timeout is not optional generosity. **Do not inherit 18K:
+  re-derive it from your own rate and timeout.** Quick mode keeps its
+  own 32K ceiling (single-shot: reasoning and the full verdict must fit
+  one call).
 
 ### Added
 - **Uncommitted-draw re-draw** (`AGENT_REVIEW_SPIRAL_REDRAW`,
