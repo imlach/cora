@@ -8,6 +8,21 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Changed
+- **Deep mode no longer requires an MCP server.** `MCP_URL` unset (now
+  the default — it was a `http://localhost:8080/mcp` placeholder) is
+  self-disarming: no probe, no toolset, and the agent loop runs on the
+  in-process `grep_repo`/`git_show` over the PR's own checkout. Deep
+  mode was previously unreachable without private infrastructure — the
+  probe failed against the placeholder and every deep run soft-skipped
+  with "MCP server unreachable", which is why the shipped adopter
+  example pins `MAX_TOOL_ITERATIONS=0`. A *configured* server that is
+  unreachable still fails the review: silently dropping tools someone
+  asked for is the worse failure. The comment footer's tool denominator
+  no longer counts MCP-served read tools when no server was attached.
+  **Deployments that relied on the localhost default must now set
+  `MCP_URL` explicitly.**
+
 ## [0.1.2] - 2026-08-03
 
 ### Changed

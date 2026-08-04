@@ -162,6 +162,10 @@ def _make_pydantic_ai_local_tools(
 def _loaded_tool_names(
     allowed_tools: set[str],
     *,
+    # The read-tools MCP server is optional now, so its names are only
+    # "loaded" when one was actually configured and probed. Defaults
+    # True so existing callers keep counting them.
+    read_enabled: bool = True,
     actions_enabled: bool = False,
     web_enabled: bool = False,
     read_tools: set[str] | frozenset[str] | None = None,
@@ -186,7 +190,9 @@ def _loaded_tool_names(
     action_set = set(_c.ACTION_TOOLS if action_tools is None else action_tools)
     web_set = set(_c.WEB_TOOLS if web_tools is None else web_tools)
 
-    loaded = set(allowed_tools) & (read_set | local_set)
+    loaded = set(allowed_tools) & local_set
+    if read_enabled:
+        loaded |= set(allowed_tools) & read_set
     if actions_enabled:
         loaded |= set(allowed_tools) & action_set
     if web_enabled:
@@ -284,7 +290,9 @@ async def deep_review_call(
       - Iteration cap via `UsageLimits(request_limit=max_iterations)` —
         framework returns a `UsageLimitExceeded` exception which we
         map to `terminated_reason="max_iterations"`
-      - The required MCP server is probed up front; failure short-
+      - MCP is optional. An empty `mcp_url` self-disarms: no probe, no
+        toolset, and the loop runs on the in-process repo tools alone.
+        A *configured* server is probed up front and failure short-
         circuits to `terminated_reason="mcp-connect-failed"` so the
         caller emits the existing "skipped (MCP server unreachable)"
         comment + `cancelled` check-run
@@ -303,16 +311,29 @@ async def deep_review_call(
 
     from cora.core.agent import AgentConfig, Deps, make_review_agent
 
-    # Pre-probe the required MCP server. Failure here returns the
-    # distinct `mcp-connect-failed` terminated_reason so the caller
-    # takes the existing "skipped (MCP server unreachable)" path —
-    # keeps Loki finish-line buckets + verdict-line text stable.
-    if not await _probe_mcp_server(mcp_url, mcp_headers, "mcp", gha_log):
-        return "", "mcp-connect-failed", [], []
-
-    mcp_servers: list[tuple[str, dict[str, str]]] = [
-        (mcp_url, mcp_headers),
-    ]
+    # No MCP URL configured → don't probe, don't register a toolset.
+    # Deep mode runs on the in-process repo tools alone: a smaller tool
+    # surface, but a working agent loop, which is what an adopter with
+    # no MCP server should get instead of a review that always skips.
+    #
+    # Configured-but-unreachable is still fatal. Failure returns the
+    # distinct `mcp-connect-failed` terminated_reason so the caller takes
+    # the existing "skipped (MCP server unreachable)" path — a review
+    # that quietly drops the tools you asked for is worse than one that
+    # asks to be retried, and it keeps the Loki finish-line buckets +
+    # verdict-line text stable.
+    mcp_url = (mcp_url or "").strip()
+    read_enabled = bool(mcp_url)
+    mcp_servers: list[tuple[str, dict[str, str]]] = []
+    if read_enabled:
+        if not await _probe_mcp_server(mcp_url, mcp_headers, "mcp", gha_log):
+            return "", "mcp-connect-failed", [], []
+        mcp_servers.append((mcp_url, mcp_headers))
+    else:
+        gha_log(
+            "no MCP server configured (MCP_URL unset) — deep mode running "
+            "on local repo tools only"
+        )
     actions_enabled = False
     web_enabled = False
 
@@ -388,6 +409,7 @@ async def deep_review_call(
     # being a useful signal that MCP tools were available.
     tools_available = _loaded_tool_names(
         allowed_tools,
+        read_enabled=read_enabled,
         actions_enabled=actions_enabled,
         web_enabled=web_enabled,
         read_tools=cfg.read_tools if cfg is not None else None,

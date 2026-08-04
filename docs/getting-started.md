@@ -47,8 +47,15 @@ export REVIEW_TRIGGER_ENFORCE=true
 .venv/bin/python -m cora
 ```
 
-`MAX_TOOL_ITERATIONS=0` runs quick mode, which avoids the deep MCP tool
-loop and is the simplest path for a first local run.
+`MAX_TOOL_ITERATIONS=0` runs quick mode — a single call, no tool loop —
+and is the simplest path for a first local run.
+
+Deep mode (`MAX_TOOL_ITERATIONS>0`) needs no extra infrastructure. With
+`MCP_URL` unset it runs the agent loop on the in-process `grep_repo` and
+`git_show` tools over the PR's own checkout, which is enough for a
+reviewer to verify claims against the code it is reviewing. Point
+`MCP_URL` at an MCP server to add your own knowledge base or action
+surface on top.
 
 `python -m cora` exits nonzero only for hard entrypoint failures, such as
 missing PR identity or an unhandled exception. Skipped reviews and review

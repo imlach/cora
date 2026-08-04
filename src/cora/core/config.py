@@ -46,17 +46,29 @@ CHECK_RUN_NAME = "cora"
 # `ReviewerConfig.use_github_review` / `REVIEW_USE_GITHUB_REVIEW`.
 DEFAULT_USE_GITHUB_REVIEW = False
 
-# Generic localhost placeholders — a deployment points these at its own
-# OpenAI-compatible gateway / MCP server via `LITELLM_BASE_URL` / `MCP_URL`
-# (folded in by `ReviewerConfig.from_env`). Structurally required (the
-# OpenAI client + MCP session need *some* URL), so they default to
-# localhost rather than None: a bare run fails fast against an obvious
-# unconfigured endpoint instead of silently mis-targeting. A configured
-# deployment supplies its own service URLs via those env vars, so these
-# defaults are never exercised there.
+# Generic localhost placeholder — a deployment points this at its own
+# OpenAI-compatible gateway via `LITELLM_BASE_URL` (folded in by
+# `ReviewerConfig.from_env`). Structurally required (the OpenAI client
+# needs *some* URL), so it defaults to localhost rather than None: a
+# bare run fails fast against an obvious unconfigured endpoint instead
+# of silently mis-targeting.
 DEFAULT_LITELLM_BASE = "http://localhost:4000"
 DEFAULT_MODEL = "review"  # LiteLLM alias
-DEFAULT_MCP_URL = "http://localhost:8080/mcp"
+
+# MCP server via `MCP_URL`. Empty is SELF-DISARMING, not "unconfigured":
+# deep mode runs on its in-process repo tools alone and never probes.
+#
+# MCP is an augmentation — a deployment's knowledge base, its own action
+# surface — not a dependency of the agent loop. Requiring it made deep
+# mode unreachable for anyone who hadn't stood a server up: the probe
+# failed against the old `http://localhost:8080/mcp` placeholder and
+# every deep run soft-skipped with "MCP server unreachable".
+#
+# The line is CONFIGURED vs NOT, and it is deliberate: unset means don't
+# use MCP; set-but-unreachable still fails loudly, because a review that
+# silently drops the tools you configured is worse than one that asks to
+# be retried.
+DEFAULT_MCP_URL = ""
 
 # Cold-start pretrigger — which `model` aliases the warmup fires at (see
 # `cora.core.pretrigger`). Only aliases that scale-from-zero pay a cold

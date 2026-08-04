@@ -238,14 +238,16 @@ async def continue_on_t1(
         log_wall_hit,
     )
 
-    # Re-probe the required MCP server. T0 already passed this check, so
-    # a failure here usually means a transient network blip mid-run.
-    if not await _probe_mcp_server(mcp_url, mcp_headers, "mcp (T1)", gha_log):
-        return "", "mcp-connect-failed", []
-
-    mcp_servers: list[tuple[str, dict[str, str]]] = [
-        (mcp_url, mcp_headers),
-    ]
+    # Same optionality as T0: an empty `mcp_url` self-disarms, a
+    # configured one is re-probed. T0 already passed this check, so a
+    # failure here usually means a transient network blip mid-run.
+    mcp_url = (mcp_url or "").strip()
+    read_enabled = bool(mcp_url)
+    mcp_servers: list[tuple[str, dict[str, str]]] = []
+    if read_enabled:
+        if not await _probe_mcp_server(mcp_url, mcp_headers, "mcp (T1)", gha_log):
+            return "", "mcp-connect-failed", []
+        mcp_servers.append((mcp_url, mcp_headers))
     actions_enabled = False
     web_enabled = False
     if mcp_actions_url and mcp_actions_headers:
@@ -263,6 +265,7 @@ async def continue_on_t1(
 
     tools_available = _loaded_tool_names(
         allowed_tools,
+        read_enabled=read_enabled,
         actions_enabled=actions_enabled,
         web_enabled=web_enabled,
         read_tools=cfg.read_tools if cfg is not None else None,
