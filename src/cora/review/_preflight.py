@@ -23,7 +23,7 @@ from cora.providers.git import GitProvider
 from cora.providers.reporter import NullReporter, Reporter
 from cora.providers.retrieval import RetrievalProvider
 from cora.result import ReviewResult
-from cora.review._signals import _arm_timeout_guard
+from cora.review._signals import _TIMEOUT_GUARD, _arm_timeout_guard
 from cora.review._state import ReviewRun
 from cora.config import ReviewerConfig
 from cora.second_opinion import SecondOpinionProvider
@@ -117,6 +117,15 @@ def preflight(run: ReviewRun) -> ReviewResult | None:
         run.reporter.open_progress(run.head_sha)
         if run.reporter.check_open:
             _arm_timeout_guard(run.reporter)
+            # A hard kill never returns through the pipeline wrapper, so
+            # hand the guard a closure that can still close the log
+            # stream. Idempotent — a normal exit that already emitted
+            # makes this a no-op.
+            from cora.review._output import emit_finish
+
+            _TIMEOUT_GUARD["finish"] = lambda: emit_finish(
+                run, terminated_reason="gha_timeout"
+            )
     else:
         print("::warning::could not derive PR head SHA; verdict check skipped")
 

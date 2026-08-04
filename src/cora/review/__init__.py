@@ -94,6 +94,7 @@ from cora.review._finalize import finalize
 # same dict object `_signals` mutates.
 from cora.review._gate import _recent_run_counts, trigger_gate  # noqa: F401
 from cora.review._output import (  # noqa: F401
+    emit_finish,
     produce_output,
     quick_review_retry_for_format,
 )
@@ -193,10 +194,14 @@ async def _arun_review_inner(
     git: GitProvider | None,
     second_opinion: SecondOpinionProvider | None,
 ) -> ReviewResult:
-    """The pipeline. Each phase mutates `run` and may return a terminal
-    `ReviewResult` (a skip — conclusion `cancelled` for transient infra
-    and policy denials, `failure` for unusable model output); the first
-    one wins."""
+    """The pipeline, wrapped so every exit closes the log stream.
+
+    `_pipeline` is where the phases live; this wrapper's only job is the
+    `agent_review finish` line. A review that logs its turns and then
+    goes silent is indistinguishable from one still running, so the
+    finish line has to survive the skip returns AND cancellation —
+    `BaseException` deliberately, since `CancelledError` is the case
+    that produced the silent runs."""
     run = build_run(
         cfg,
         reporter=reporter,
@@ -204,6 +209,22 @@ async def _arun_review_inner(
         git=git,
         second_opinion=second_opinion,
     )
+    try:
+        result = await _pipeline(run)
+    except BaseException as exc:
+        emit_finish(run, terminated_reason=f"cancelled:{type(exc).__name__}")
+        raise
+    # No-op on the normal path — `produce_output` already emitted with
+    # the leak/preamble detail. This catches the skip returns, which
+    # never reach it.
+    emit_finish(run, terminated_reason=result.terminated_reason)
+    return result
+
+
+async def _pipeline(run: ReviewRun) -> ReviewResult:
+    """Each phase mutates `run` and may return a terminal `ReviewResult`
+    (a skip — conclusion `cancelled` for transient infra and policy
+    denials, `failure` for unusable model output); the first one wins."""
     if (skip := preflight(run)) is not None:
         return skip
     if (skip := trigger_gate(run)) is not None:

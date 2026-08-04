@@ -129,6 +129,11 @@ class ReviewRun:
     body_to_post: str = ""
     verdict: str | None = None
     reasoning_stripped_chars: int = 0
+    # Exactly one `agent_review finish` line per review, on whichever
+    # path exits first. Set by `_output.emit_finish`; the pipeline
+    # wrapper and the SIGTERM guard both call it, and this flag is what
+    # stops the normal path emitting twice.
+    finish_emitted: bool = False
 
     # ── propose_patch ───────────────────────────────────────────────
     patch_directive: object | None = None
