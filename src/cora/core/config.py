@@ -251,6 +251,23 @@ QUICK_MAX_OUTPUT_TOKENS = 32_000
 # also raising `per_call_timeout_s` re-opens the invisible-loss window.
 DEEP_MAX_OUTPUT_TOKENS = 12_000
 
+# ── Uncommitted-draw re-draw ───────────────────────────────────────
+# A turn that hits `DEEP_MAX_OUTPUT_TOKENS` with no tool call and no
+# verdict-shaped text produced nothing the loop can use. Re-send the
+# IDENTICAL payload once (`cora.core.spiral.committed_prefix`) inside
+# the still-open agent context, so MCP sessions stay warm.
+#
+# Default-ON, unlike the bounded recovery below, because it only fires
+# on a turn that is already lost and it perturbs nothing: same alias,
+# same prompt, same settings — just another roll of the sampler. The
+# observed behaviour it exploits is that a payload which spiralled once
+# usually completes on an immediate re-send. Killswitch:
+# `AGENT_REVIEW_SPIRAL_REDRAW=false`.
+#
+# The cost is bounded at one extra call per tier leg; the loop's
+# iteration and wall budgets still apply to it.
+SPIRAL_REDRAW_ENABLED = True
+
 # ── Spiral recovery ────────────────────────────────────────────────
 # Reasoning-spiral recovery for the `review` reasoning model.
 # Occasionally a turn spends its ENTIRE per-call output budget

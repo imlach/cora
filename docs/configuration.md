@@ -39,6 +39,7 @@ for the Anthropic/Bedrock topology.
 | `CORA_ESCALATION_TRIGGERS` | CSV of escalation triggers for the default ladder (`wall_hit`, `blocker`, `low_confidence`; default `wall_hit`) |
 | `AGENT_REVIEW_PER_CALL_TIMEOUT_S` | Per-model-call timeout |
 | `AGENT_REVIEW_MAX_COMPLETION_TOKENS` | Per-call completion ceiling for the deep tier legs (T0/T1). Size it so one draw finishes inside `AGENT_REVIEW_PER_CALL_TIMEOUT_S` at your backend's generation rate — a draw that can't is cancelled mid-generation and records nothing |
+| `AGENT_REVIEW_SPIRAL_REDRAW` | Defaults to `true`; set `false` to disable the one-shot re-send when a turn hits the completion ceiling without committing to a tool call or a verdict |
 
 ## Trigger Policy
 

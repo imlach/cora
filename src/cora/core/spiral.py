@@ -24,6 +24,15 @@ This is the same shape as `continuation.continue_on_t1` (re-run with
 `message_history=<captured>` + a lead-in prompt), just a different trigger
 (reasoning spiral vs T0 wall-hit), same model/tier, with a tight budget.
 
+Two rungs, cheapest first. `is_uncommitted_draw` + `committed_prefix`
+drive the in-loop **re-draw**: re-send the identical payload once, no
+prompt perturbation, because the same draw usually succeeds on a second
+roll. Only when that also fails does the bounded conclude-now recovery
+above (`build_recovery_leadin`, opt-in) spend a differently-shaped call.
+The re-draw needs no exception at all — it fires on the response
+boundary, which also catches the truncated-prose case that never makes
+pydantic-ai raise.
+
 Duck-typed on each part's `part_kind` discriminator (the stable literal
 pydantic-ai stamps on every message part) with a class-name fallback —
 mirrors `loop_logging.py` / `transcript.py`'s getattr-on-parts style — so
@@ -36,7 +45,7 @@ captured messages, which is robust to pydantic-ai version drift.
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 
 def _part_kind(part: Any) -> str:
@@ -91,6 +100,69 @@ def is_reasoning_spiral(messages: Iterable[Any]) -> bool:
     return has_thinking and not has_text and not has_tool_call
 
 
+def is_uncommitted_draw(
+    *,
+    finish_reason: Any,
+    tool_calls: int,
+    text: str,
+    has_verdict: Callable[[str], bool] | None = None,
+) -> bool:
+    """True iff a turn spent its whole completion budget without
+    committing to anything the loop can use.
+
+    The signature is `finish_reason='length'` AND no tool call AND no
+    verdict-shaped text: the model was cut off by the token ceiling
+    mid-reasoning, so continuing the loop would carry a dead turn
+    forward. Deliberately independent of *how* the budget was spent —
+    a thinking-only response and a truncated prose ramble are the same
+    problem, and only the first of those makes pydantic-ai raise.
+
+    Text that already parses as a verdict is a usable answer whose tail
+    got clipped, not a spiral — the loop keeps it. With no `has_verdict`
+    probe we cannot tell, so any text at all is treated as usable (the
+    conservative direction: never re-draw over a real answer).
+    """
+    if str(finish_reason or "").lower() != "length":
+        return False
+    if tool_calls:
+        return False
+    if not text.strip():
+        return True
+    if has_verdict is None:
+        return False
+    return not has_verdict(text)
+
+
+def committed_prefix(messages: Iterable[Any]) -> list[Any]:
+    """The captured history with a trailing `ModelResponse` dropped —
+    i.e. exactly the payload that was sent to produce it.
+
+    Re-issuing this prefix re-rolls the same draw with no prompt
+    perturbation, which is the point: an identical re-send of a payload
+    that spiralled typically completes normally, so the cheapest
+    recovery is to ask again rather than to ask differently. A history
+    that doesn't end in a response is returned unchanged.
+    """
+    msgs = list(messages or [])
+    if msgs and msgs[-1] is _last_model_response(msgs):
+        return msgs[:-1]
+    return msgs
+
+
+def tool_call_names(messages: Iterable[Any], *, start: int = 0) -> list[str]:
+    """Tool names called in `messages[start:]`, in emission order.
+
+    Lets a caller that recovered via a plain `agent.run` (which drives
+    its own loop, bypassing the per-turn instrumentation) fold the
+    dispatches it made back into the shared tool-call accounting."""
+    names: list[str] = []
+    for msg in list(messages or [])[start:]:
+        for part in getattr(msg, "parts", []) or []:
+            if _part_kind(part) == "tool-call":
+                names.append(str(getattr(part, "tool_name", "") or "<unknown>"))
+    return names
+
+
 def extract_partial_reasoning(messages: Iterable[Any], *, char_cap: int) -> str:
     """Concatenate the `ThinkingPart` content of the last `ModelResponse`,
     returning the TAIL truncated to `char_cap`.
@@ -110,6 +182,36 @@ def extract_partial_reasoning(messages: Iterable[Any], *, char_cap: int) -> str:
     if char_cap >= 0 and len(reasoning) > char_cap:
         return reasoning[-char_cap:]
     return reasoning
+
+
+def extract_final_text(messages: Iterable[Any]) -> str:
+    """Concatenate the `TextPart` content of the last `ModelResponse`.
+
+    The salvage path: a turn cut off by the completion ceiling mid-prose
+    still said something, and a truncated review beats no review. Returns
+    "" for a thinking-only response, which has nothing to salvage."""
+    resp = _last_model_response(messages)
+    if resp is None:
+        return ""
+    return "".join(
+        str(getattr(p, "content", "") or "")
+        for p in (getattr(resp, "parts", []) or [])
+        if _part_kind(p) == "text"
+    )
+
+
+def is_completion_ceiling_exception(exc: BaseException) -> bool:
+    """True for pydantic-ai's two completion-ceiling raises: "token limit
+    … exceeded before any response was generated" (thinking-only) and
+    "… exceeded while generating a tool call" (truncated tool args).
+
+    Matched on the shared "token limit" phrasing rather than the class,
+    because both are `UnexpectedModelBehavior` and only the message
+    separates them from unrelated model-behaviour failures. Narrower on
+    purpose than `is_token_limit_exception` below, which is a coarse
+    type-first classifier for the soft-fail path — this one decides
+    whether to spend another call, so a false positive costs money."""
+    return "token limit" in str(exc).lower()
 
 
 # Concise directive prepended to the recovered reasoning tail. Frames the

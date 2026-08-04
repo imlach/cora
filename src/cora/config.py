@@ -96,6 +96,12 @@ class ReviewerConfig:
     # `core.config.DEEP_MAX_OUTPUT_TOKENS`). Used by both the T0 and T1 legs;
     # env knob is `AGENT_REVIEW_MAX_COMPLETION_TOKENS`.
     deep_max_output_tokens: int = _c.DEEP_MAX_OUTPUT_TOKENS
+    # ── Uncommitted-draw re-draw ─────────────────────────────────────
+    # Re-send the identical payload once when a turn hits the completion
+    # ceiling without a tool call or a verdict. Default-ON (killswitch
+    # `AGENT_REVIEW_SPIRAL_REDRAW=false`) — see
+    # `core.config.SPIRAL_REDRAW_ENABLED`.
+    spiral_redraw: bool = _c.SPIRAL_REDRAW_ENABLED
     # ── Spiral recovery (reasoning-spiral restart) ───────────────────
     # When a reasoning-model turn spends its whole output budget inside
     # `<think>` and emits no body, recover by re-issuing ONE bounded call
@@ -334,6 +340,10 @@ class ReviewerConfig:
             deep_max_output_tokens=getint(
                 "AGENT_REVIEW_MAX_COMPLETION_TOKENS", _c.DEEP_MAX_OUTPUT_TOKENS
             ),
+            # Uncommitted-draw re-draw — default-true killswitch (only
+            # the literal "false" disables), matching the other
+            # reliability defaults.
+            spiral_redraw=getflag_on("AGENT_REVIEW_SPIRAL_REDRAW"),
             # Spiral recovery — default-false gate (only the literal
             # "true" enables); the bounds tolerate empty →
             # engine default. Unset keeps the default soft-fail.

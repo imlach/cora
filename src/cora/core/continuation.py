@@ -38,6 +38,7 @@ from cora.core.deep_review import (
     _WALL_TIME_WAIT_FOR_GRACE_S,
     _loaded_tool_names,
     _make_pydantic_ai_local_tools,
+    _make_verdict_probe,
 )
 from cora.core import config as _c
 from cora.core.budget import resolve_run_usage, usage_tokens
@@ -227,14 +228,16 @@ async def continue_on_t1(
     `mcp-connect-failed` reason for finalize-path consistency.
     """
     from pydantic_ai import ModelSettings, UsageLimits
-    from pydantic_ai.exceptions import UsageLimitExceeded
+    from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 
     from cora.core.agent import AgentConfig, Deps, make_review_agent
     from cora.core.loop_logging import (
         PerCallTimeoutExceeded,
+        ReasoningSpiralDetected,
         WallTimeExceeded,
         iter_with_turn_logging,
         log_continuation_start,
+        log_spiral_redraw,
         log_wall_hit,
     )
 
@@ -341,6 +344,14 @@ async def continue_on_t1(
     # comment in deep_review.py for the background.
     early_terminated_reason: str | None = None
 
+    # Uncommitted-draw re-draw — same shape as T0 (deep_review.py).
+    # Supplying `verdict_probe` is what arms detection.
+    redraw_on = cfg is None or cfg.spiral_redraw
+    verdict_probe = _make_verdict_probe(cfg) if redraw_on else None
+    redraw_from_turn: int | None = None
+    result = None
+    messages: list = []
+
     # Two entry shapes:
     #   - resume: prior_messages non-empty → _CONTINUATION_PROMPT framing
     #   - fresh-start: prior_messages empty + initial_user_prompt given
@@ -433,6 +444,7 @@ async def continue_on_t1(
                         extend_deadline_fn=(
                             _extend_t1_deadline if context_refresher is not None else None
                         ),
+                        verdict_probe=verdict_probe,
                     )
                     if wait_for_timeout is not None:
                         await asyncio.wait_for(inner_coro, timeout=wait_for_timeout)
@@ -476,6 +488,37 @@ async def continue_on_t1(
                         f"(cap {exc.cap_s:.0f}s)"
                     )
                     early_terminated_reason = "per_call_timeout"
+                except ReasoningSpiralDetected as exc:
+                    print(
+                        f"::warning::T1 turn {exc.turn} hit the completion "
+                        f"ceiling without committing ({exc.out_tokens} out "
+                        f"tokens) — re-drawing once"
+                    )
+                    try:
+                        messages = list(agent_run.all_messages())
+                    except Exception:  # noqa: BLE001
+                        messages = []
+                    redraw_from_turn = exc.turn
+                except UnexpectedModelBehavior as exc:
+                    # Chiefly a tool call truncated mid-arguments, which
+                    # the boundary check above doesn't claim. Same root
+                    # cause, same re-draw; anything else keeps today's
+                    # `agent-loop-errored` mapping via the outer handler.
+                    from cora.core import spiral as _spiral
+
+                    if not (
+                        redraw_on and _spiral.is_completion_ceiling_exception(exc)
+                    ):
+                        raise
+                    print(
+                        f"::warning::T1 hit the completion ceiling mid-commit "
+                        f"({exc!s:.120}) — re-drawing once"
+                    )
+                    try:
+                        messages = list(agent_run.all_messages())
+                    except Exception:  # noqa: BLE001
+                        messages = []
+                    redraw_from_turn = turn_counter[0]
                 except (WallTimeExceeded, asyncio.TimeoutError) as exc:
                     overshoot = (
                         getattr(exc, "overshoot_s", None)
@@ -497,6 +540,82 @@ async def continue_on_t1(
                     )
                     print(f"::warning::T1 continuation hit wall-time guard ({detail})")
                     early_terminated_reason = "wall_time"
+
+            # Uncommitted-draw re-draw — inside `async with agent`, so
+            # the MCP sessions stay warm. Re-sends the exact payload
+            # that spiralled (no new user prompt), re-rolling the
+            # sampler rather than rephrasing the request. See
+            # `deep_review.deep_review_call` for the full rationale.
+            if redraw_from_turn is not None and result is None:
+                from cora.core import spiral as _spiral
+
+                prefix = _spiral.committed_prefix(messages)
+                if not prefix:
+                    log_spiral_redraw(
+                        phase="T1",
+                        pr_number=pr_number,
+                        turn=redraw_from_turn,
+                        outcome="skipped",
+                        log=gha_log,
+                        reason="no_committed_prefix",
+                    )
+                else:
+                    try:
+                        redraw = await agent.run(
+                            None,
+                            message_history=prefix,
+                            deps=deps,
+                            model_settings=ModelSettings(
+                                max_tokens=(
+                                    cfg.deep_max_output_tokens
+                                    if cfg is not None
+                                    else _c.DEEP_MAX_OUTPUT_TOKENS
+                                ),
+                                temperature=0.2,
+                                timeout=timeout_s,
+                            ),
+                            usage_limits=UsageLimits(
+                                request_limit=max(
+                                    1, max_iterations - redraw_from_turn
+                                )
+                            ),
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        log_spiral_redraw(
+                            phase="T1",
+                            pr_number=pr_number,
+                            turn=redraw_from_turn,
+                            outcome=(
+                                "spiralled_again"
+                                if _spiral.is_completion_ceiling_exception(exc)
+                                else "errored"
+                            ),
+                            log=gha_log,
+                            detail=f'"{exc!s:.120}"',
+                        )
+                    else:
+                        redraw_messages = list(redraw.all_messages())
+                        redraw_tools = _spiral.tool_call_names(
+                            redraw_messages, start=len(prefix)
+                        )
+                        for name in redraw_tools:
+                            tool_call_counter[name] = (
+                                tool_call_counter.get(name, 0) + 1
+                            )
+                            try:
+                                budget.add_tool_call(name)
+                            except Exception:  # noqa: BLE001
+                                pass
+                        result = redraw
+                        messages = redraw_messages
+                        log_spiral_redraw(
+                            phase="T1",
+                            pr_number=pr_number,
+                            turn=redraw_from_turn,
+                            outcome="recovered",
+                            log=gha_log,
+                            redraw_tool_calls=len(redraw_tools),
+                        )
     except Exception as exc:  # noqa: BLE001
         # See deep_review.py for the rationale — preserve an inner
         # wall-hit reason if one was already set; only treat outer
@@ -509,6 +628,20 @@ async def continue_on_t1(
             f"T1 agent context cleanup raised after {early_terminated_reason} "
             f"trip — suppressing: {exc!r}"
         )
+
+    # Re-draw exhausted: keep whatever the spiralled turn said rather
+    # than dropping T1's contribution. Same salvage rule as T0.
+    if redraw_from_turn is not None and result is None and early_terminated_reason is None:
+        from cora.core import spiral as _spiral
+
+        salvage = _spiral.extract_final_text(messages)
+        if salvage.strip():
+            gha_log(
+                f"T1 re-draw did not recover (PR #{pr_number}) — posting "
+                f"the truncated turn ({len(salvage)} chars)"
+            )
+            return salvage, None, tools_available
+        return "", "agent-loop-errored: spiral-redraw-exhausted", tools_available
 
     if early_terminated_reason is not None:
         return "", early_terminated_reason, tools_available

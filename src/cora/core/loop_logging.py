@@ -35,6 +35,11 @@ Events emitted (`event=…` label):
   reasoning model.
 - `wall_hit` — `UsageLimitExceeded` (or future timeout/budget
   trip). Adds `terminated_reason=…`, `turns=…`, `tool_calls=…`.
+- `spiral_redraw` — a turn hit the completion ceiling without
+  committing and the identical payload was re-sent once. Adds
+  `turn=…`, `outcome=…` (`recovered` / `spiralled_again` /
+  `errored` / `skipped`). Emitted from the tier callers, which own
+  the agent context the re-draw runs inside.
 - `continuation_start` — T1 picked up T0's wall-hit. Adds
   `prior_messages=…`, `prior_text_chars=…`, `prior_tool_calls=…`,
   `request_limit=…`. Emitted from `continuation.py` rather than
@@ -111,6 +116,43 @@ class PerCallTimeoutExceeded(Exception):
         self.turn = turn
         self.elapsed_s = elapsed_s
         self.cap_s = cap_s
+
+
+class ReasoningSpiralDetected(Exception):
+    """Raised by `iter_with_turn_logging` when a turn ends
+    `finish_reason='length'` having produced no tool call and no
+    verdict-shaped text — its whole completion budget went into
+    reasoning (see `spiral.is_uncommitted_draw`).
+
+    The opposite operational signal to `PerCallTimeoutExceeded`: the
+    call SUCCEEDED and came back with data, it just came back with
+    nothing the loop can use. Raised at the response boundary so the
+    caller can re-draw while its agent context — and therefore its MCP
+    sessions — is still open.
+
+    Fires ahead of pydantic-ai's own `UnexpectedModelBehavior` for the
+    thinking-only case (the `CallToolsNode` carrying the response is
+    yielded before `CallToolsNode.run()` raises), and additionally
+    covers the truncated-prose case, which produces a `TextPart` and so
+    never raises at all."""
+
+    def __init__(
+        self,
+        turn: int,
+        *,
+        thinking_chars: int,
+        text_chars: int,
+        out_tokens: int,
+    ):
+        super().__init__(
+            f"turn {turn} hit the completion ceiling without committing "
+            f"({out_tokens} out tokens, {thinking_chars} thinking chars, "
+            f"{text_chars} text chars, no tool call, no verdict)"
+        )
+        self.turn = turn
+        self.thinking_chars = thinking_chars
+        self.text_chars = text_chars
+        self.out_tokens = out_tokens
 
 
 # Tool-call args land in the log with this much detail; full args
@@ -191,6 +233,13 @@ async def iter_with_turn_logging(
     # injection extension is `INJECTION_DEADLINE_EXTENSION_S`; cap is
     # enforced by the refresher's `can_extend()` check below.
     extend_deadline_fn: Callable[[float], None] | None = None,
+    # `(text) -> bool`: does this response body already carry a parseable
+    # verdict? Supplying it ARMS uncommitted-draw detection — a turn that
+    # hits the completion ceiling with no tool call and no verdict raises
+    # `ReasoningSpiralDetected` instead of being carried forward. None
+    # (the default) disarms it, which is what triage callers, tests, and
+    # the re-draw's own second pass want.
+    verdict_probe: Callable[[str], bool] | None = None,
 ):
     """Drive `agent_run` node-by-node and emit per-turn log lines.
 
@@ -417,11 +466,12 @@ async def iter_with_turn_logging(
                 for p in parts
                 if isinstance(p, ThinkingPart)
             )
-            text_chars = sum(
-                len(getattr(p, "content", "") or "")
+            text = "".join(
+                str(getattr(p, "content", "") or "")
                 for p in parts
                 if isinstance(p, TextPart)
             )
+            text_chars = len(text)
             tool_calls = sum(1 for p in parts if isinstance(p, ToolCallPart))
             usage = getattr(resp, "usage", None)
             in_t = int(getattr(usage, "input_tokens", 0) or 0) if usage else 0
@@ -446,6 +496,26 @@ async def iter_with_turn_logging(
                 finish=finish,
                 elapsed_s=f"{elapsed_f:.1f}",
             )
+
+            # Uncommitted draw — the turn burned its completion ceiling
+            # and produced nothing the loop can carry forward. Raise
+            # before the refresher poll below: there is no point
+            # gathering fresh context for a turn we're about to discard.
+            if verdict_probe is not None:
+                from cora.core import spiral as _spiral
+
+                if _spiral.is_uncommitted_draw(
+                    finish_reason=finish,
+                    tool_calls=tool_calls,
+                    text=text,
+                    has_verdict=verdict_probe,
+                ):
+                    raise ReasoningSpiralDetected(
+                        turn_counter[0],
+                        thinking_chars=thinking_chars,
+                        text_chars=text_chars,
+                        out_tokens=out_t,
+                    )
 
             # Push-based context injection — runs after each model
             # response (CallToolsNode boundary, same as the wall-time
@@ -494,6 +564,39 @@ def log_wall_hit(
         terminated_reason=terminated_reason,
         turns=turn_counter[0],
         tool_calls=total_tools,
+    )
+
+
+def log_spiral_redraw(
+    *,
+    phase: str,
+    pr_number: str,
+    turn: int,
+    outcome: str,
+    log: _LogFn,
+    **fields: Any,
+) -> None:
+    """Marker for one uncommitted-draw re-draw attempt.
+
+    `outcome` is the disposition, one of:
+      - `recovered`      — the re-draw produced a usable body
+      - `spiralled_again`— the re-draw hit the ceiling the same way
+      - `errored`        — the re-draw raised (MCP blip, wall-time, …)
+      - `skipped`        — detection fired but no re-draw ran (disabled,
+                           or no committed prefix to re-send)
+
+    A rising `spiralled_again` share means the ceiling is genuinely too
+    low for the workload rather than the draw being unlucky — that is
+    the signal to raise `AGENT_REVIEW_MAX_COMPLETION_TOKENS` (and
+    `AGENT_REVIEW_PER_CALL_TIMEOUT_S` with it), not to add re-draws."""
+    _emit(
+        pr_number=pr_number,
+        phase=phase,
+        event="spiral_redraw",
+        log=log,
+        turn=turn,
+        outcome=outcome,
+        **fields,
     )
 
 
