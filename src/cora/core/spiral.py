@@ -240,6 +240,26 @@ _RECOVERY_DIRECTIVE = (
 )
 
 
+_RESUME_DIRECTIVE = (
+    "Your previous turn was interrupted partway through its answer. "
+    "What you had written so far is below. Continue from there and "
+    "produce the complete review in the required output format "
+    "(the standard `Verdict:` line and review body)."
+)
+
+
+def build_resume_leadin(prior_text: str) -> str:
+    """Lead-in for a re-draw that has salvaged visible text from an
+    aborted stream.
+
+    Distinct from `build_recovery_leadin`: that one feeds back
+    *reasoning* and asks the model to commit; this one feeds back the
+    *answer so far* and asks it to continue. Used only when a stream was
+    cut after the model had started writing — otherwise the re-draw
+    stays a pure re-send with no prompt perturbation at all."""
+    return f"{_RESUME_DIRECTIVE}\n\n<partial answer>\n{prior_text}"
+
+
 def build_recovery_leadin(reasoning_tail: str) -> str:
     """The recovery prompt: the conclude-now directive followed by the
     prior reasoning tail, framed so the model treats the reasoning as its

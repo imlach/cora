@@ -234,6 +234,7 @@ async def continue_on_t1(
     from cora.core.loop_logging import (
         PerCallTimeoutExceeded,
         ReasoningSpiralDetected,
+        StreamStallDetected,
         WallTimeExceeded,
         iter_with_turn_logging,
         log_continuation_start,
@@ -349,6 +350,8 @@ async def continue_on_t1(
     redraw_on = cfg is None or cfg.spiral_redraw
     verdict_probe = _make_verdict_probe(cfg) if redraw_on else None
     redraw_from_turn: int | None = None
+    redraw_prior_text: str = ""
+    stream_on = cfg is not None and cfg.stream_detection
     result = None
     messages: list = []
 
@@ -445,6 +448,16 @@ async def continue_on_t1(
                             _extend_t1_deadline if context_refresher is not None else None
                         ),
                         verdict_probe=verdict_probe,
+                        # Streaming detection (opt-in) — same knobs T0
+                        # uses; off means the helper awaits each call
+                        # whole, exactly as before.
+                        stream_detect=stream_on,
+                        stall_timeout_s=(
+                            cfg.stall_timeout_s if cfg is not None else 30.0
+                        ),
+                        thinking_budget_tokens=(
+                            cfg.thinking_budget_tokens if cfg is not None else 0
+                        ),
                     )
                     if wait_for_timeout is not None:
                         await asyncio.wait_for(inner_coro, timeout=wait_for_timeout)
@@ -488,17 +501,25 @@ async def continue_on_t1(
                         f"(cap {exc.cap_s:.0f}s)"
                     )
                     early_terminated_reason = "per_call_timeout"
-                except ReasoningSpiralDetected as exc:
-                    print(
-                        f"::warning::T1 turn {exc.turn} hit the completion "
-                        f"ceiling without committing ({exc.out_tokens} out "
-                        f"tokens) — re-drawing once"
-                    )
+                except (ReasoningSpiralDetected, StreamStallDetected) as exc:
+                    if isinstance(exc, StreamStallDetected):
+                        print(
+                            f"::warning::T1 turn {exc.turn} stalled "
+                            f"({exc.idle_s:.0f}s with no delta after "
+                            f"{exc.streamed_tokens} tokens) — re-drawing once"
+                        )
+                    else:
+                        print(
+                            f"::warning::T1 turn {exc.turn} hit the completion "
+                            f"ceiling without committing ({exc.out_tokens} out "
+                            f"tokens) — re-drawing once"
+                        )
                     try:
                         messages = list(agent_run.all_messages())
                     except Exception:  # noqa: BLE001
                         messages = []
                     redraw_from_turn = exc.turn
+                    redraw_prior_text = getattr(exc, "partial_text", "") or ""
                 except UnexpectedModelBehavior as exc:
                     # Chiefly a tool call truncated mid-arguments, which
                     # the boundary check above doesn't claim. Same root
@@ -562,7 +583,13 @@ async def continue_on_t1(
                 else:
                     try:
                         redraw = await agent.run(
-                            None,
+                            # Pure re-send unless an aborted stream left
+                            # visible text — then resume from it.
+                            (
+                                _spiral.build_resume_leadin(redraw_prior_text)
+                                if redraw_prior_text.strip()
+                                else None
+                            ),
                             message_history=prefix,
                             deps=deps,
                             model_settings=ModelSettings(

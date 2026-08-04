@@ -102,6 +102,14 @@ class ReviewerConfig:
     # `AGENT_REVIEW_SPIRAL_REDRAW=false`) — see
     # `core.config.SPIRAL_REDRAW_ENABLED`.
     spiral_redraw: bool = _c.SPIRAL_REDRAW_ENABLED
+    # ── Streaming detection (default-OFF) ────────────────────────────
+    # Consume tier model calls as delta streams so a stall and a spiral
+    # can be told apart while they happen. See
+    # `core.config.STREAM_DETECTION_ENABLED` for why this is opt-in.
+    stream_detection: bool = _c.STREAM_DETECTION_ENABLED
+    stall_timeout_s: float = _c.STALL_TIMEOUT_S
+    thinking_budget_tokens: int = _c.THINKING_BUDGET_TOKENS
+    spiral_degrade_thinking: bool = _c.SPIRAL_DEGRADE_THINKING
     # ── Spiral recovery (reasoning-spiral restart) ───────────────────
     # When a reasoning-model turn spends its whole output budget inside
     # `<think>` and emits no body, recover by re-issuing ONE bounded call
@@ -344,6 +352,19 @@ class ReviewerConfig:
             # the literal "false" disables), matching the other
             # reliability defaults.
             spiral_redraw=getflag_on("AGENT_REVIEW_SPIRAL_REDRAW"),
+            # Streaming detection — default-false gate (only the literal
+            # "true" enables); its tunables tolerate empty → engine
+            # default and are inert while the gate is off.
+            stream_detection=getbool(
+                "AGENT_REVIEW_STREAM_DETECTION", _c.STREAM_DETECTION_ENABLED
+            ),
+            stall_timeout_s=getfloat("AGENT_REVIEW_STALL_TIMEOUT_S", _c.STALL_TIMEOUT_S),
+            thinking_budget_tokens=getint(
+                "AGENT_REVIEW_THINKING_BUDGET_TOKENS", _c.THINKING_BUDGET_TOKENS
+            ),
+            spiral_degrade_thinking=getbool(
+                "AGENT_REVIEW_SPIRAL_DEGRADE_THINKING", _c.SPIRAL_DEGRADE_THINKING
+            ),
             # Spiral recovery — default-false gate (only the literal
             # "true" enables); the bounds tolerate empty →
             # engine default. Unset keeps the default soft-fail.

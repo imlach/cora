@@ -40,6 +40,16 @@ Events emitted (`event=…` label):
   `turn=…`, `outcome=…` (`recovered` / `spiralled_again` /
   `errored` / `skipped`). Emitted from the tier callers, which own
   the agent context the re-draw runs inside.
+- `spiral_detected` — streaming only. Reasoning deltas passed
+  `thinking_budget_tokens` with no text or tool-call delta, so the
+  call was aborted mid-flight. Adds `turn=…`, `thinking_tokens=…`,
+  `text_tokens=…`, `budget_tokens=…`.
+- `stall_detected` — streaming only. No delta of any kind for
+  `stall_timeout_s`. Adds `turn=…`, `idle_s=…`, `thinking_tokens=…`,
+  `text_tokens=…`, `salvaged_chars=…`. The pair is the point:
+  `spiral_detected` is a model generating hard, `stall_detected` is a
+  wire that stopped. A whole-call timeout cannot tell them apart, and
+  reported both as the same `per_call_timeout`.
 - `continuation_start` — T1 picked up T0's wall-hit. Adds
   `prior_messages=…`, `prior_text_chars=…`, `prior_tool_calls=…`,
   `request_limit=…`. Emitted from `continuation.py` rather than
@@ -118,6 +128,41 @@ class PerCallTimeoutExceeded(Exception):
         self.cap_s = cap_s
 
 
+class StreamStallDetected(Exception):
+    """Raised when a streaming model call goes silent for longer than
+    `stall_timeout_s` — no delta of any kind arrived.
+
+    This is the distinction a whole-call timeout cannot draw. A model
+    thinking at full speed and a dead wire look identical from outside
+    the call: both produce nothing for minutes. Inside the stream they
+    are opposites — one is a steady delta rate, the other is silence.
+    Separating them is the entire reason for streaming here.
+
+    Raised from inside `node.stream(...)`, which cancels the in-flight
+    request task rather than committing a partial response, so the
+    backend stops generating and the history stays clean for a
+    re-draw."""
+
+    def __init__(
+        self,
+        turn: int,
+        *,
+        idle_s: float,
+        streamed_tokens: int,
+        partial_text: str = "",
+    ):
+        super().__init__(
+            f"turn {turn} produced no stream delta for {idle_s:.0f}s "
+            f"after {streamed_tokens} streamed tokens"
+        )
+        self.turn = turn
+        self.idle_s = idle_s
+        self.streamed_tokens = streamed_tokens
+        # Visible text streamed before the wire went quiet — threaded
+        # into the re-draw so it resumes rather than restarting blind.
+        self.partial_text = partial_text
+
+
 class ReasoningSpiralDetected(Exception):
     """Raised by `iter_with_turn_logging` when a turn ends
     `finish_reason='length'` having produced no tool call and no
@@ -143,6 +188,7 @@ class ReasoningSpiralDetected(Exception):
         thinking_chars: int,
         text_chars: int,
         out_tokens: int,
+        partial_text: str = "",
     ):
         super().__init__(
             f"turn {turn} hit the completion ceiling without committing "
@@ -153,6 +199,12 @@ class ReasoningSpiralDetected(Exception):
         self.thinking_chars = thinking_chars
         self.text_chars = text_chars
         self.out_tokens = out_tokens
+        # Visible text the turn had emitted before it was aborted. Only
+        # ever populated on the streaming path — a response that came
+        # back whole is already in the history, so the caller reads it
+        # from there. Threaded into the re-draw so it resumes rather
+        # than restarting blind.
+        self.partial_text = partial_text
 
 
 # Tool-call args land in the log with this much detail; full args
@@ -173,6 +225,45 @@ def _truncate_args(args: Any) -> str:
     if len(text) > _ARGS_LOG_CHAR_CAP:
         return text[:_ARGS_LOG_CHAR_CAP] + f"…[truncated at {_ARGS_LOG_CHAR_CAP}]"
     return text
+
+
+def _delta_kind(event: Any) -> str:
+    """Classify one stream event as `thinking` / `text` / `tool` / `other`.
+
+    Duck-typed on the delta's `part_delta_kind` discriminator (and the
+    part's `part_kind` for the start events), with a class-name
+    fallback — same style as `spiral._part_kind`, so a fake delta
+    stream in a unit test needs no pydantic-ai objects and a framework
+    rename doesn't silently reclassify everything as `other`.
+    """
+    payload = getattr(event, "delta", None) or getattr(event, "part", None) or event
+    kind = (
+        getattr(payload, "part_delta_kind", None)
+        or getattr(payload, "part_kind", None)
+        or ""
+    )
+    name = str(kind) or type(payload).__name__
+    lowered = name.lower()
+    if "thinking" in lowered:
+        return "thinking"
+    if "tool" in lowered:
+        return "tool"
+    if "text" in lowered:
+        return "text"
+    return "other"
+
+
+def _delta_text(event: Any) -> str:
+    """The visible-text content of a stream event, or "".
+
+    `TextPartDelta` carries `content_delta`; a `PartStartEvent` carries
+    the seed part with `content`. Anything else contributes nothing."""
+    payload = getattr(event, "delta", None) or getattr(event, "part", None) or event
+    for attr in ("content_delta", "content"):
+        value = getattr(payload, attr, None)
+        if isinstance(value, str):
+            return value
+    return ""
 
 
 def _emit(
@@ -240,6 +331,23 @@ async def iter_with_turn_logging(
     # (the default) disarms it, which is what triage callers, tests, and
     # the re-draw's own second pass want.
     verdict_probe: Callable[[str], bool] | None = None,
+    # Streaming detection (opt-in). Consumes each model call as a delta
+    # stream instead of awaiting it whole, which is the only way to tell
+    # a thinking model from a dead wire before the per-call cap fires.
+    # Degrades to the non-streaming path when the run or node doesn't
+    # expose the streaming surface, so an older pydantic-ai, a fake
+    # agent_run in a test, or a triage caller all keep working.
+    stream_detect: bool = False,
+    # Inter-delta silence that counts as a stall. Sized well above a
+    # slow token (a model at 2 tok/s still emits every 500ms) and well
+    # below the per-call cap, so a stall is caught in seconds instead of
+    # minutes.
+    stall_timeout_s: float = 30.0,
+    # Reasoning deltas a single turn may stream before it must have
+    # committed to something. Breaching it with no text or tool-call
+    # delta IS the spiral, caught while it's happening rather than
+    # inferred from a corpse.
+    thinking_budget_tokens: int = 10_000,
 ):
     """Drive `agent_run` node-by-node and emit per-turn log lines.
 
@@ -325,6 +433,100 @@ async def iter_with_turn_logging(
     # (which is the natural carrier of the tool-returns + next user
     # turn). The pending state lives across `__anext__` calls.
     pending_injection: str | None = None
+
+    def _can_stream(node: Any) -> bool:
+        """Streaming needs both halves of the surface: a node that can
+        open a stream and a run that can hand it the graph context.
+        Missing either — an older pydantic-ai, a stand-in `agent_run` in
+        a test, a triage caller — falls back to awaiting the whole call,
+        which is the pre-feature behaviour."""
+        return (
+            stream_detect
+            and callable(getattr(node, "stream", None))
+            and getattr(agent_run, "ctx", None) is not None
+        )
+
+    async def _consume_stream(node: Any, *, turn: int) -> None:
+        """Drive one model call as a delta stream, aborting on a stall
+        or a runaway reasoning budget.
+
+        Raising out of this block is what aborts. Pydantic-ai's
+        `ModelRequestNode.stream` cancels the in-flight request task on
+        an exception and does NOT append a partial response, so the
+        backend stops generating and the history stays exactly at the
+        payload we would re-send. Exiting normally lets the framework
+        finalise the response as usual, so the `CallToolsNode` that
+        follows is byte-identical to the non-streaming path.
+
+        Token counts are streamed-delta counts, not tokeniser output:
+        the backend emits one delta per token, so the two agree closely
+        enough for a budget and neither the engine nor the log claims
+        more precision than that."""
+        thinking_deltas = 0
+        text_deltas = 0
+        text_parts: list[str] = []
+        committed = False
+        async with node.stream(agent_run.ctx) as stream:
+            events = stream.__aiter__()
+            while True:
+                try:
+                    event = await asyncio.wait_for(
+                        events.__anext__(), timeout=stall_timeout_s
+                    )
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    partial = "".join(text_parts)
+                    _emit(
+                        pr_number=pr_number,
+                        phase=phase,
+                        event="stall_detected",
+                        log=log,
+                        turn=turn,
+                        idle_s=f"{stall_timeout_s:.0f}",
+                        thinking_tokens=thinking_deltas,
+                        text_tokens=text_deltas,
+                        salvaged_chars=len(partial),
+                    )
+                    raise StreamStallDetected(
+                        turn,
+                        idle_s=stall_timeout_s,
+                        streamed_tokens=thinking_deltas + text_deltas,
+                        partial_text=partial,
+                    )
+                kind = _delta_kind(event)
+                if kind == "thinking":
+                    thinking_deltas += 1
+                elif kind == "tool":
+                    # A tool call is a commitment; the turn has somewhere
+                    # to go and the reasoning budget stops applying.
+                    committed = True
+                elif kind == "text":
+                    committed = True
+                    text_deltas += 1
+                    text_parts.append(_delta_text(event))
+                if (
+                    not committed
+                    and thinking_budget_tokens > 0
+                    and thinking_deltas > thinking_budget_tokens
+                ):
+                    _emit(
+                        pr_number=pr_number,
+                        phase=phase,
+                        event="spiral_detected",
+                        log=log,
+                        turn=turn,
+                        thinking_tokens=thinking_deltas,
+                        text_tokens=0,
+                        budget_tokens=thinking_budget_tokens,
+                    )
+                    raise ReasoningSpiralDetected(
+                        turn,
+                        thinking_chars=0,
+                        text_chars=0,
+                        out_tokens=thinking_deltas,
+                    )
+
     while True:
         if _current_deadline is not None:
             now = time.monotonic()
@@ -425,6 +627,31 @@ async def iter_with_turn_logging(
                 log=log,
                 turn=turn_counter[0],
             )
+            if _can_stream(node):
+                # Consume the model call HERE rather than letting the
+                # next `__anext__()` await it whole. The per-call cap
+                # moves with it: it's the same wall on the same work,
+                # and `last_was_model_request` stays False so the now-
+                # trivial next step isn't wrapped a second time.
+                model_call_count += 1
+                step_cap = per_call_timeout_s
+                if step_cap is not None:
+                    if model_call_count == 1 and first_call_extra_timeout_s:
+                        step_cap += first_call_extra_timeout_s
+                stream_start = time.monotonic()
+                try:
+                    coro = _consume_stream(node, turn=turn_counter[0])
+                    if step_cap is not None:
+                        await asyncio.wait_for(coro, timeout=step_cap)
+                    else:
+                        await coro
+                except asyncio.TimeoutError as exc:
+                    raise PerCallTimeoutExceeded(
+                        turn=turn_counter[0],
+                        elapsed_s=time.monotonic() - stream_start,
+                        cap_s=step_cap or 0.0,
+                    ) from exc
+                last_was_model_request = False
         elif isinstance(node, CallToolsNode):
             resp = getattr(node, "model_response", None)
             if resp is None:

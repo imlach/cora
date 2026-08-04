@@ -268,6 +268,55 @@ DEEP_MAX_OUTPUT_TOKENS = 12_000
 # iteration and wall budgets still apply to it.
 SPIRAL_REDRAW_ENABLED = True
 
+# ── Streaming detection ────────────────────────────────────────────
+# Consume each tier model call as a delta stream instead of awaiting it
+# whole. A non-streaming call is opaque until it completes, so a model
+# generating at full speed and a wire that died look identical from
+# outside — both just produce nothing, and both end up recorded as the
+# same per-call timeout. Inside the stream they are opposites.
+#
+# Default-OFF. The bounded draw + re-draw above address the observed
+# failure directly and cost nothing when they don't fire; this moves
+# every model call onto a different framework path, which is a larger
+# blast radius for a benefit the re-draw telemetry hasn't yet shown to
+# be needed. Turn it on when `spiral_redraw outcome=spiralled_again`
+# says re-drawing isn't enough, or when a genuine stall needs telling
+# apart from a genuine spiral. `AGENT_REVIEW_STREAM_DETECTION=true`.
+STREAM_DETECTION_ENABLED = False
+# Inter-delta silence that counts as a stall. Well above one slow token
+# (a model at 2 tok/s still emits every 500ms) and well below the
+# per-call cap, so a dead wire is caught in seconds rather than minutes.
+STALL_TIMEOUT_S = 30
+# Reasoning deltas one turn may stream before it must have committed to
+# text or a tool call. Below `DEEP_MAX_OUTPUT_TOKENS` so the abort fires
+# before the ceiling does — the point is to stop paying for a spiral,
+# not to observe one land.
+THINKING_BUDGET_TOKENS = 10_000
+# Last resort after a payload has spiralled TWICE: one bounded commit
+# turn with reasoning mechanically off, via
+# `chat_template_kwargs={"enable_thinking": false}`. Verified against
+# the reference deployment's Qwen3-family chat template, whose
+# generation prompt pre-fills an empty `<think></think>` block on that
+# kwarg; inert on a template that doesn't reference it, since Jinja
+# ignores unused kwargs.
+#
+# Default-OFF, and narrow by construction. Turning reasoning off on a
+# reasoning model costs real review quality, so this is not something to
+# do silently — an operator opts in when they would rather have a
+# degraded verdict than a dropped review.
+#
+# What keeps it from being a lobotomy: `request_limit=1`, so it cannot
+# make an un-reasoned tool decision or carry a shallow conclusion
+# forward. It is a WRITE-UP turn, not an analysis turn — seeded with the
+# reasoning tail and the same "you have already done the analysis"
+# directive as `SPIRAL_RECOVERY_*`, on a context that (with the
+# reference deployment's server-side `preserve_thinking`) still carries
+# the model's own prior `<think>` blocks. The difference from that rung
+# is only that the instruction is mechanical rather than advisory —
+# which matters precisely because a spiralling model is the one that
+# ignores being asked to think less.
+SPIRAL_DEGRADE_THINKING = False
+
 # ── Spiral recovery ────────────────────────────────────────────────
 # Reasoning-spiral recovery for the `review` reasoning model.
 # Occasionally a turn spends its ENTIRE per-call output budget
