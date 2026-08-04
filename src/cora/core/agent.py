@@ -24,6 +24,12 @@ if TYPE_CHECKING:
     from cora.config import ReviewerConfig
 
 
+# Request header carrying the per-review session identifier. Fixed
+# name, caller-supplied value — a gateway configured to hash on it can
+# pin one review's turns to one replica; anything else ignores it.
+SESSION_HEADER = "x-review-session"
+
+
 def _default_reviewer_config() -> "ReviewerConfig":
     """Default-construct a `ReviewerConfig` lazily — the import happens at
     first `Deps()` construction, not at module load, so `cora.core.agent`
@@ -138,6 +144,17 @@ class AgentConfig:
     # Output-validation retries don't apply here (`output_type=str`).
     retries: int = 1
 
+    # Opaque per-review session identifier. When set, every model call
+    # this agent makes carries `x-review-session: <value>`.
+    #
+    # The client half of gateway session affinity: a gateway that can
+    # hash on the header keeps one review's turns on one replica, so
+    # the prefix cache the earlier turns warmed is still the one serving
+    # the later ones. cora neither knows nor cares whether anything
+    # downstream reads it — an unconfigured deployment sends no header
+    # and nothing changes.
+    session_id: str | None = None
+
 
 def make_review_agent(config: AgentConfig, deps_type: type = Deps):
     """Build a Pydantic-AI Agent from the supplied config.
@@ -180,10 +197,13 @@ def make_review_agent(config: AgentConfig, deps_type: type = Deps):
     # pydantic-ai's Agent wrapper. The client is owned by the
     # underlying AsyncOpenAI; not explicitly closed because the
     # per-PR process exits after the review lands.
+    session_id = (config.session_id or "").strip()
     provider = OpenAIProvider(
         base_url=config.endpoint_base_url,
         api_key=config.api_key,
-        http_client=build_capture_client(),
+        http_client=build_capture_client(
+            {SESSION_HEADER: session_id} if session_id else None
+        ),
     )
     model = OpenAIChatModel(config.model_alias, provider=provider)
 

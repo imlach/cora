@@ -91,9 +91,25 @@ class ReviewerConfig:
     # turn (see `core.config.QUICK_MAX_OUTPUT_TOKENS`).
     quick_max_output_tokens: int = _c.QUICK_MAX_OUTPUT_TOKENS
     # Deep mode's per-call cap — each agent-loop turn must fit the model's
-    # reasoning trace plus its text/tool-call (see
-    # `core.config.DEEP_MAX_OUTPUT_TOKENS`). Used by both the T0 and T1 legs.
+    # reasoning trace plus its text/tool-call, and must be reachable inside
+    # `per_call_timeout_s` at the deployment's generation rate (see
+    # `core.config.DEEP_MAX_OUTPUT_TOKENS`). Used by both the T0 and T1 legs;
+    # env knob is `AGENT_REVIEW_MAX_COMPLETION_TOKENS`.
     deep_max_output_tokens: int = _c.DEEP_MAX_OUTPUT_TOKENS
+    # ── Uncommitted-draw re-draw ─────────────────────────────────────
+    # Re-send the identical payload once when a turn hits the completion
+    # ceiling without a tool call or a verdict. Default-ON (killswitch
+    # `AGENT_REVIEW_SPIRAL_REDRAW=false`) — see
+    # `core.config.SPIRAL_REDRAW_ENABLED`.
+    spiral_redraw: bool = _c.SPIRAL_REDRAW_ENABLED
+    # ── Streaming detection (default-OFF) ────────────────────────────
+    # Consume tier model calls as delta streams so a stall and a spiral
+    # can be told apart while they happen. See
+    # `core.config.STREAM_DETECTION_ENABLED` for why this is opt-in.
+    stream_detection: bool = _c.STREAM_DETECTION_ENABLED
+    stall_timeout_s: float = _c.STALL_TIMEOUT_S
+    thinking_budget_tokens: int = _c.THINKING_BUDGET_TOKENS
+    spiral_degrade_thinking: bool = _c.SPIRAL_DEGRADE_THINKING
     # ── Spiral recovery (reasoning-spiral restart) ───────────────────
     # When a reasoning-model turn spends its whole output budget inside
     # `<think>` and emits no body, recover by re-issuing ONE bounded call
@@ -215,6 +231,11 @@ class ReviewerConfig:
     # so existing REVIEWER_BROADEN_TOOLS deployments keep working.
     broaden_tools: bool = False
     per_call_timeout_s: float | None = None
+    # Opaque per-review session id sent as `x-review-session` on every
+    # model call. The client half of gateway session affinity — see
+    # `cora.core.agent.SESSION_HEADER`. None sends no header at all, so
+    # an unconfigured deployment is byte-identical to before.
+    session_header: str | None = None
     transcript_dir: str | None = None
     transcript_source: str = _c.DEFAULT_TRANSCRIPT_SOURCE
     eval_output_dir: str | None = None
@@ -324,8 +345,35 @@ class ReviewerConfig:
                 "REVIEWER_TRANSCRIPT_SOURCE", _c.DEFAULT_TRANSCRIPT_SOURCE
             ),
             eval_output_dir=get("AGENT_REVIEW_EVAL_OUTPUT_DIR"),
+            # Empty is treated as unset: a deployment that exports the
+            # variable but computes no value must send no header,
+            # not an empty one.
+            session_header=get("AGENT_REVIEW_SESSION_HEADER"),
             loop_guard_bot_login=get("AGENT_REVIEW_LOOP_GUARD_BOT_LOGIN"),
             max_tool_iterations=getint("MAX_TOOL_ITERATIONS", _c.DEFAULT_MAX_TOOL_ITERATIONS),
+            # Per-call completion ceiling for the tier (deep) legs. Sized
+            # against `per_call_timeout_s`, not against the context window —
+            # see `_c.DEEP_MAX_OUTPUT_TOKENS`.
+            deep_max_output_tokens=getint(
+                "AGENT_REVIEW_MAX_COMPLETION_TOKENS", _c.DEEP_MAX_OUTPUT_TOKENS
+            ),
+            # Uncommitted-draw re-draw — default-true killswitch (only
+            # the literal "false" disables), matching the other
+            # reliability defaults.
+            spiral_redraw=getflag_on("AGENT_REVIEW_SPIRAL_REDRAW"),
+            # Streaming detection — default-false gate (only the literal
+            # "true" enables); its tunables tolerate empty → engine
+            # default and are inert while the gate is off.
+            stream_detection=getbool(
+                "AGENT_REVIEW_STREAM_DETECTION", _c.STREAM_DETECTION_ENABLED
+            ),
+            stall_timeout_s=getfloat("AGENT_REVIEW_STALL_TIMEOUT_S", _c.STALL_TIMEOUT_S),
+            thinking_budget_tokens=getint(
+                "AGENT_REVIEW_THINKING_BUDGET_TOKENS", _c.THINKING_BUDGET_TOKENS
+            ),
+            spiral_degrade_thinking=getbool(
+                "AGENT_REVIEW_SPIRAL_DEGRADE_THINKING", _c.SPIRAL_DEGRADE_THINKING
+            ),
             # Spiral recovery — default-false gate (only the literal
             # "true" enables); the bounds tolerate empty →
             # engine default. Unset keeps the default soft-fail.

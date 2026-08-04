@@ -38,6 +38,13 @@ for the Anthropic/Bedrock topology.
 | `AGENT_REVIEW_SKIP_T0` | Starts directly on T1 when set to `true` |
 | `CORA_ESCALATION_TRIGGERS` | CSV of escalation triggers for the default ladder (`wall_hit`, `blocker`, `low_confidence`; default `wall_hit`) |
 | `AGENT_REVIEW_PER_CALL_TIMEOUT_S` | Per-model-call timeout |
+| `AGENT_REVIEW_MAX_COMPLETION_TOKENS` | Per-call completion ceiling for the deep tier legs (T0/T1). Size it so one draw finishes inside `AGENT_REVIEW_PER_CALL_TIMEOUT_S` at your backend's generation rate — a draw that can't is cancelled mid-generation and records nothing |
+| `AGENT_REVIEW_SPIRAL_REDRAW` | Defaults to `true`; set `false` to disable the one-shot re-send when a turn hits the completion ceiling without committing to a tool call or a verdict |
+| `AGENT_REVIEW_STREAM_DETECTION` | `true` consumes tier model calls as delta streams, so a stalled wire and a thinking model can be told apart while the call is in flight. Default off |
+| `AGENT_REVIEW_STALL_TIMEOUT_S` | Inter-delta silence that counts as a stall (default 30). Streaming only |
+| `AGENT_REVIEW_THINKING_BUDGET_TOKENS` | Reasoning deltas one turn may stream before it must commit to text or a tool call (default 16000). Streaming only |
+| `AGENT_REVIEW_SPIRAL_DEGRADE_THINKING` | `true` allows ONE bounded write-up turn with reasoning disabled after a payload has spiralled twice. Off by default — it costs review quality, so it is an explicit operator choice |
+| `AGENT_REVIEW_SESSION_HEADER` | Opaque per-review value sent as `x-review-session` on every model call. The client half of gateway session affinity: a gateway that hashes on it keeps one review's turns on one replica, so the prefix cache the early turns warmed still serves the later ones. Unset sends no header |
 
 ## Trigger Policy
 

@@ -220,55 +220,69 @@ VERDICT_WORDS: tuple[str, str, str] = ("looks good", "minor", "needs changes")
 # past the iteration ceiling hit it. Output cap unchanged.
 MAX_INPUT_TOKENS = 250_000
 MAX_OUTPUT_TOKENS = 16_000
-# Quick mode is single-shot (no tools, no agent loop): the one call must
-# fit the model's reasoning trace AND the verdict body. The `review`
-# alias typically serves a reasoning model that can think at length, so a
-# per-turn-sized cap leaves no room: the model spends the whole budget in
-# `<think>` and hits `finish_reason=length` with no body, which surfaces
-# as "Model token limit (N) exceeded before any response was generated"
-# and a failed review. Quick gets its own ceiling;
-# deep gets DEEP_MAX_OUTPUT_TOKENS below. Well within the review chain's
-# typical context windows (e.g. 80K–256K).
+# Quick mode is single-shot, so its one call must fit the reasoning trace
+# AND the verdict body — hence its own, larger ceiling than the deep
+# per-turn cap below. It also draws once per review rather than 4-6
+# times, so the timeout arithmetic that bounds the deep cap doesn't bite.
 QUICK_MAX_OUTPUT_TOKENS = 32_000
-# Deep mode's PER-CALL output cap (each agent-loop turn). Same failure mode
-# as quick — a turn that spends its whole budget in `<think>` finishes
-# `finish_reason=length` with thinking only, pydantic-ai raises, and the
-# deep loop errors out. This cap has climbed 8K → 16K →
-# 32K as the review model's reasoning grew: the review reasoning model blew
-# the whole 16K on turn-1 thinking of a substantive PR. 32K is a safe
-# ceiling on an 80K-context T0 backend across a multi-turn loop (input
-# grows ~2-3K/turn); a larger-context T1 endpoint (e.g. 256K) has ample
-# room. Used by BOTH the T0
-# (deep_review.py) and T1 (continuation.py) legs.
-DEEP_MAX_OUTPUT_TOKENS = 32_000
+# Deep mode's per-call output cap (each agent-loop turn), used by both the
+# T0 and T1 legs. Env: `AGENT_REVIEW_MAX_COMPLETION_TOKENS`.
+#
+# Sized against `per_call_timeout_s`, NOT the context window, and bounded
+# both ways: above the longest completion observed to succeed (~16K) or it
+# truncates real reviews, and below timeout × generation rate (~19.8K at
+# 110 tok/s against the 180s default) or the draw is cancelled
+# mid-generation and records nothing. Re-derive the pair together.
+DEEP_MAX_OUTPUT_TOKENS = 18_000
+
+# ── Uncommitted-draw re-draw ───────────────────────────────────────
+# A turn that hits the cap with no tool call and no verdict-shaped text
+# produced nothing the loop can use; re-send the IDENTICAL payload once
+# (`spiral.committed_prefix`) inside the still-open agent context.
+#
+# Default-ON: it fires only on a turn already lost, perturbs nothing, and
+# costs at most one extra call per tier leg — the loop's iteration and
+# wall budgets still bound it. Killswitch `AGENT_REVIEW_SPIRAL_REDRAW`.
+SPIRAL_REDRAW_ENABLED = True
+
+# ── Streaming detection ────────────────────────────────────────────
+# Consume tier model calls as delta streams. A non-streaming call is
+# opaque until it completes, so a model generating at full speed and a
+# dead wire look identical; inside the stream they are opposites.
+#
+# Default-OFF: it routes every model call through a different framework
+# path, for a benefit the re-draw above may make unnecessary. Enable when
+# `spiral_redraw outcome=spiralled_again` says re-drawing isn't enough.
+STREAM_DETECTION_ENABLED = False
+# Inter-delta silence that counts as a stall. Above one slow token (2
+# tok/s still emits every 500ms), far below the per-call cap.
+STALL_TIMEOUT_S = 30
+# Reasoning deltas a turn may stream before it must commit to text or a
+# tool call. Must clear the reasoning a legitimate turn spends (~15K
+# observed) yet stay under `DEEP_MAX_OUTPUT_TOKENS` — a narrow gap, so on
+# this model streaming earns its keep on stalls rather than spirals.
+THINKING_BUDGET_TOKENS = 16_000
+# Last resort after a payload has spiralled TWICE: one write-up turn with
+# `chat_template_kwargs={"enable_thinking": false}` and `request_limit=1`,
+# so it cannot make an un-reasoned tool decision. Inert on a chat template
+# that doesn't read the kwarg.
+#
+# Default-OFF — disabling reasoning on a reasoning model costs review
+# quality, so it stays an explicit operator choice.
+SPIRAL_DEGRADE_THINKING = False
 
 # ── Spiral recovery ────────────────────────────────────────────────
-# Reasoning-spiral recovery for the `review` reasoning model.
-# Occasionally a turn spends its ENTIRE per-call output budget
-# inside `<think>` and emits no text/tool-call — `finish_reason='length'`
-# with thinking-only parts — so pydantic-ai raises `UnexpectedModelBehavior`
-# ("Model token limit (N) exceeded before any response was generated").
-# Quick mode soft-fails; deep mode errors out (`agent-loop-errored`). The
-# spiral is high-variance (the SAME PR has reasoned 58,740 chars one run,
-# 8,082 the next), so bumping the per-call cap is a treadmill.
+# Rung two, when the re-draw above is skipped or comes back empty: ONE
+# bounded call seeded with the partial-reasoning tail and a "produce the
+# final review now" directive (`cora.core.spiral`). Reasoning stays
+# ENABLED, just bounded — the tight cap does the work, not the prompt.
 #
-# Recovery (`cora.core.spiral`) detects the thinking-only response from
-# the captured messages, re-issues ONE bounded call seeded with the
-# partial-reasoning tail + a "produce the final review now" directive,
-# and feeds the result into the normal verdict path. Recovery KEEPS
-# reasoning ENABLED (no `enable_thinking=False`) but bounds it: a tight
-# output cap + a "keep further reasoning brief" lead-in. One attempt; if
-# it spirals/fails again, the existing soft-fail path runs unchanged.
-#
-# Default-OFF so a bare engine run is unchanged — no capture wrapper,
-# no retry. Opt in via `AGENT_REVIEW_SPIRAL_RECOVERY=true`. Mirrored as
-# the `ReviewerConfig.spiral_*`
-# fields.
+# Default-OFF; opt in via `AGENT_REVIEW_SPIRAL_RECOVERY`. On a second
+# failure the pre-existing soft-fail path runs unchanged.
 SPIRAL_RECOVERY_ENABLED = False
-# Bounded recovery-turn output cap — tight vs the 32K main cap. The model
-# has already done the analysis; recovery only needs to commit the verdict
-# body, so 12K leaves room for a brief wrap-up think without inviting a
-# second runaway.
+# Bounded recovery-turn output cap — deliberately tighter than
+# `DEEP_MAX_OUTPUT_TOKENS`. The analysis is already done; this turn only
+# has to commit the verdict body.
 SPIRAL_RECOVERY_MAX_OUTPUT_TOKENS = 12_000
 # How much of the partial-reasoning TAIL to feed back into the recovery
 # prompt. The tail is where conclusions form, so we keep the last N chars

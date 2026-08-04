@@ -346,12 +346,19 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
     # blocker / low_confidence via `cfg.escalation_triggers`).
     # Two forced entries bypass the policy by design:
     #   - `classifier_large_start` (skip-T0 path) — T1 starts fresh;
-    #   - `per_call_timeout` with NO committed messages — T0's first
-    #     turn hung before any history existed; T1 runs on a
-    #     different endpoint so it likely won't stall the same way.
+    #   - `per_call_timeout` with NO model response — T0 hung before the
+    #     model said anything, so there's no trajectory to resume; T1
+    #     runs on a different endpoint and starts fresh.
+    #
+    # The response test, not `not t0_messages`: pydantic-ai appends the
+    # outgoing request to the history before awaiting the model, so the
+    # history is never empty and the old emptiness guard never fired.
+    from cora.core.spiral import has_model_response
+
     skip_t0_start = run.terminated_reason == "classifier_large_start"
     run.per_call_fresh_start = (
-        run.terminated_reason == "per_call_timeout" and not t0_messages
+        run.terminated_reason == "per_call_timeout"
+        and not has_model_response(t0_messages)
     )
     # Parse the T0 verdict up front so the blocker / low_confidence
     # triggers see it; the final parse for the posted comment happens

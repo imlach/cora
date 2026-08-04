@@ -81,6 +81,40 @@ def _thinking_extra_body(enable_thinking: bool | None = None) -> dict[str, Any]:
     return {}
 
 
+def _no_thinking_extra_body() -> dict[str, Any]:
+    """The explicit reasoning-OFF chat-template kwarg.
+
+    Distinct from `_thinking_extra_body`, which only ever sends the ON
+    direction and stays silent otherwise. A template that gates on
+    `enable_thinking is false` needs the key present and false — an
+    absent key means "default", which for a reasoning model means ON.
+
+    Only used by the last-resort degraded write-up turn; see
+    `core.config.SPIRAL_DEGRADE_THINKING` for why that is off by
+    default and bounded to a single turn."""
+    return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
+
+
+def _make_verdict_probe(cfg: "ReviewerConfig | None") -> Callable[[str], bool]:
+    """`(text) -> bool`: does this response body already carry a
+    parseable verdict?
+
+    Bound to the deployment's glyph/word vocabulary so a rebranded
+    verdict line is judged by its own markers. Used to tell a turn that
+    ran out of budget mid-answer (re-draw it) from one whose answer is
+    complete and merely clipped in the tail (keep it)."""
+    from cora.core import config as _c
+    from cora.core.leak import parse_verdict_from_body
+
+    glyphs = cfg.verdict_glyphs if cfg is not None else _c.VERDICT_GLYPHS
+    words = cfg.verdict_words if cfg is not None else _c.VERDICT_WORDS
+
+    def _probe(text: str) -> bool:
+        return parse_verdict_from_body(text, glyphs=glyphs, words=words) is not None
+
+    return _probe
+
+
 def _make_pydantic_ai_local_tools(
     tool_arg_defaults: dict[str, dict[str, Any]] | None,
     *,
@@ -299,12 +333,21 @@ async def deep_review_call(
       - Any other framework error returns
         `terminated_reason="agent-loop-errored: <exc>"` and the caller
         routes through the no-final-body skip path
+      - Uncommitted-draw re-draw (`cfg.spiral_redraw`, default-ON): a
+        turn that hits the completion ceiling with no tool call and no
+        parseable verdict is re-sent ONCE, identical payload, inside the
+        same agent context. Covers both the thinking-only shape (which
+        pydantic-ai raises on) and the truncated-prose shape (which it
+        doesn't). Logs `event=spiral_redraw outcome=…`.
       - Reasoning-spiral recovery (opt-in via `cfg.spiral_recovery`,
-        default-OFF): a thinking-only `UnexpectedModelBehavior` turn
-        triggers ONE bounded recovery `agent.run` re-seeded with the
-        captured partial reasoning (see `cora.core.spiral`) before
-        falling back to the `agent-loop-errored` soft-fail. Flag-off and
-        non-spiral errors follow the pre-feature path unchanged.
+        default-OFF): rung two. When the re-draw is skipped or comes
+        back empty, ONE bounded recovery `agent.run` re-seeded with the
+        captured partial reasoning + a "conclude now" directive (see
+        `cora.core.spiral`).
+      - Salvage: with both rungs spent, a turn that produced any visible
+        text returns that text — a truncated review, which is what this
+        path produced before either rung existed. Only a thinking-only
+        turn falls through to the `agent-loop-errored` soft-fail.
     """
     from pydantic_ai import ModelSettings, UsageLimits
     from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
@@ -375,6 +418,7 @@ async def deep_review_call(
         ),
         # Tool-call retries on transient MCP failures.
         retries=1,
+        session_id=cfg.session_header if cfg is not None else None,
     )
     agent = make_review_agent(config)
 
@@ -395,8 +439,11 @@ async def deep_review_call(
     # event extraction lives in the node loop.
     from cora.core.loop_logging import (
         PerCallTimeoutExceeded,
+        ReasoningSpiralDetected,
+        StreamStallDetected,
         WallTimeExceeded,
         iter_with_turn_logging,
+        log_spiral_redraw,
         log_wall_hit,
     )
 
@@ -451,6 +498,22 @@ async def deep_review_call(
     # bounded recovery turn re-seeds from. None = no spiral detected.
     spiral_messages: list | None = None
 
+    # Uncommitted-draw re-draw (default-ON killswitch). Arming detection
+    # is the presence of `verdict_probe`: a turn that hits the completion
+    # ceiling with no tool call and no parseable verdict raises
+    # `ReasoningSpiralDetected` at the response boundary instead of being
+    # carried forward as a dead turn.
+    redraw_on = cfg is None or cfg.spiral_redraw
+    verdict_probe = _make_verdict_probe(cfg) if redraw_on else None
+    # Set by the detection handler to the turn number that spiralled;
+    # the re-draw below runs inside the still-open agent context.
+    redraw_from_turn: int | None = None
+    # Visible text an aborted stream had already produced. Seeds the
+    # re-draw so it resumes instead of restarting blind; "" keeps the
+    # re-draw a pure re-send.
+    redraw_prior_text: str = ""
+    stream_on = cfg is not None and cfg.stream_detection
+
     result = None
     try:
         # Open the agent context once so all MCP toolset sessions stay
@@ -468,18 +531,14 @@ async def deep_review_call(
                 initial_user_prompt,
                 deps=deps,
                 model_settings=ModelSettings(
-                    # Per-call output budget — must absorb the model's
-                    # `<think>...</think>` reasoning block AND leave room for
-                    # the turn's text / tool-call. Pydantic-AI raises
-                    # `UnexpectedModelBehavior` when a turn finishes with
-                    # `finish_reason='length'` and only thinking parts came
-                    # back (`_agent_graph.py` L1104). This cap has climbed
-                    # 8k → 16k → `DEEP_MAX_OUTPUT_TOKENS` as the review model's
-                    # reasoning grew — the review reasoning model blew the whole
-                    # 16k on turn 1 of a substantive PR.
+                    # Per-call output budget — absorbs the model's
+                    # `<think>...</think>` block AND the turn's text /
+                    # tool-call, bounded so one draw always finishes inside
+                    # `per_call_timeout_s` (see `_c.DEEP_MAX_OUTPUT_TOKENS`).
+                    # An over-long draw therefore ends as `finish_reason=
+                    # 'length'` — a signal the loop re-draws on — instead of
+                    # a call the timeout discards mid-generation.
                     # Config-threaded; T1 (continuation.py) uses the same cap.
-                    # Fits the review chain's typical context windows
-                    # (e.g. 80k T0, 256k T1).
                     max_tokens=deep_max_tokens,
                     temperature=0.2,
                     timeout=timeout_s,
@@ -562,6 +621,16 @@ async def deep_review_call(
                         extend_deadline_fn=(
                             _extend_t0_deadline if context_refresher is not None else None
                         ),
+                        verdict_probe=verdict_probe,
+                        # Streaming detection (opt-in). Off = the helper
+                        # awaits each call whole, exactly as before.
+                        stream_detect=stream_on,
+                        stall_timeout_s=(
+                            cfg.stall_timeout_s if cfg is not None else 30.0
+                        ),
+                        thinking_budget_tokens=(
+                            cfg.thinking_budget_tokens if cfg is not None else 0
+                        ),
                     )
                     if wait_for_timeout is not None:
                         await asyncio.wait_for(inner_coro, timeout=wait_for_timeout)
@@ -612,6 +681,31 @@ async def deep_review_call(
                     except Exception:  # noqa: BLE001
                         messages = []
                     early_terminated_reason = "per_call_timeout"
+                except (ReasoningSpiralDetected, StreamStallDetected) as exc:
+                    # Either the turn came back empty of anything usable,
+                    # or (streaming) it was aborted mid-flight for
+                    # reasoning past its budget or for going silent.
+                    # Both leave the history at the payload we'd re-send,
+                    # so both take the re-draw below — the agent context
+                    # is still open there, so MCP isn't rebuilt.
+                    if isinstance(exc, StreamStallDetected):
+                        print(
+                            f"::warning::deep mode turn {exc.turn} stalled "
+                            f"({exc.idle_s:.0f}s with no delta after "
+                            f"{exc.streamed_tokens} tokens) — re-drawing once"
+                        )
+                    else:
+                        print(
+                            f"::warning::deep mode turn {exc.turn} hit the "
+                            f"completion ceiling without committing "
+                            f"({exc.out_tokens} out tokens) — re-drawing once"
+                        )
+                    try:
+                        messages = list(agent_run.all_messages())
+                    except Exception:  # noqa: BLE001
+                        messages = []
+                    redraw_from_turn = exc.turn
+                    redraw_prior_text = getattr(exc, "partial_text", "") or ""
                 except (WallTimeExceeded, asyncio.TimeoutError) as exc:
                     # Wall-time guard tripped. Same downstream shape as
                     # max_iterations — snapshot messages so T1
@@ -643,25 +737,184 @@ async def deep_review_call(
                     except Exception:  # noqa: BLE001
                         messages = []
                     early_terminated_reason = "wall_time"
-                except UnexpectedModelBehavior:
-                    # A turn finished `finish_reason='length'` with only a
-                    # `<think>` block — pydantic-ai raises before any usable
-                    # response. With spiral recovery ON and the captured
-                    # messages confirming a thinking-only spiral, snapshot
-                    # the working state and break out to the bounded
-                    # recovery run below. Otherwise re-raise so the outer
-                    # handler maps it to `agent-loop-errored` exactly as
-                    # today (flag-OFF and non-spiral are unchanged).
+                except UnexpectedModelBehavior as exc:
+                    # pydantic-ai's own completion-ceiling raise. The
+                    # boundary check above already catches the common
+                    # thinking-only shape; this handler is what's left —
+                    # chiefly a tool call truncated mid-arguments
+                    # (`IncompleteToolCall`), which the boundary check
+                    # deliberately doesn't claim (it has a tool call).
+                    # Same root cause, so it takes the same re-draw.
                     try:
                         snapshot = list(agent_run.all_messages())
                     except Exception:  # noqa: BLE001
                         snapshot = []
                     from cora.core import spiral as _spiral
-                    if spiral_on and _spiral.is_reasoning_spiral(snapshot):
+                    if redraw_on and _spiral.is_completion_ceiling_exception(exc):
+                        print(
+                            f"::warning::deep mode hit the completion ceiling "
+                            f"mid-commit ({exc!s:.120}) — re-drawing once"
+                        )
+                        messages = snapshot
+                        redraw_from_turn = turn_counter[0]
+                    elif spiral_on and _spiral.is_reasoning_spiral(snapshot):
+                        # Bounded conclude-now recovery (opt-in) — the
+                        # second rung, reached when the re-draw is off.
                         spiral_messages = snapshot
                         messages = snapshot
                     else:
                         raise
+
+            # ── Uncommitted-draw re-draw ─────────────────────────────
+            # Still inside `async with agent`, so the MCP sessions the
+            # main loop opened are reused rather than rebuilt. `agent.run`
+            # with the committed prefix and NO new user prompt re-sends
+            # the exact payload that spiralled — the point is to re-roll
+            # the sampler, not to ask a different question — and drives
+            # its own tool loop, so a re-draw that decides to call a tool
+            # still finishes the review.
+            if redraw_from_turn is not None and result is None:
+                from cora.core import spiral as _spiral
+
+                prefix = _spiral.committed_prefix(messages)
+                if not prefix:
+                    log_spiral_redraw(
+                        phase="T0",
+                        pr_number=pr_number,
+                        turn=redraw_from_turn,
+                        outcome="skipped",
+                        log=gha_log,
+                        reason="no_committed_prefix",
+                    )
+                else:
+                    try:
+                        redraw = await agent.run(
+                            # A pure re-send unless an aborted stream
+                            # left visible text — then resume from it
+                            # rather than throwing the work away.
+                            (
+                                _spiral.build_resume_leadin(redraw_prior_text)
+                                if redraw_prior_text.strip()
+                                else None
+                            ),
+                            message_history=prefix,
+                            deps=deps,
+                            model_settings=ModelSettings(
+                                max_tokens=deep_max_tokens,
+                                temperature=0.2,
+                                timeout=timeout_s,
+                                **_thinking_extra_body(
+                                    cfg.enable_thinking if cfg is not None else None
+                                ),
+                            ),
+                            # Whatever iteration budget the main loop
+                            # left; the re-draw is a continuation of the
+                            # same review, not a fresh allowance.
+                            usage_limits=UsageLimits(
+                                request_limit=max(1, max_iterations - redraw_from_turn)
+                            ),
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        redraw_outcome = (
+                            "spiralled_again"
+                            if _spiral.is_completion_ceiling_exception(exc)
+                            else "errored"
+                        )
+                        log_spiral_redraw(
+                            phase="T0",
+                            pr_number=pr_number,
+                            turn=redraw_from_turn,
+                            outcome=redraw_outcome,
+                            log=gha_log,
+                            detail=f'"{exc!s:.120}"',
+                        )
+                        # Last resort. The payload has now spiralled
+                        # twice, so the model has shown that on THIS
+                        # draw its reasoning doesn't terminate. One
+                        # bounded write-up turn with reasoning
+                        # mechanically off — `request_limit=1` so it
+                        # cannot make an un-reasoned tool decision, and
+                        # seeded with the conclude-now directive so it
+                        # commits what it already worked out. Opt-in.
+                        if (
+                            redraw_outcome == "spiralled_again"
+                            and cfg is not None
+                            and cfg.spiral_degrade_thinking
+                        ):
+                            try:
+                                degraded = await agent.run(
+                                    _spiral.build_recovery_leadin(
+                                        _spiral.extract_partial_reasoning(
+                                            messages,
+                                            char_cap=(
+                                                cfg.spiral_recovery_reasoning_char_cap
+                                            ),
+                                        )
+                                    ),
+                                    message_history=prefix,
+                                    deps=deps,
+                                    model_settings=ModelSettings(
+                                        max_tokens=(
+                                            cfg.spiral_recovery_max_output_tokens
+                                        ),
+                                        temperature=0.2,
+                                        timeout=timeout_s,
+                                        **_no_thinking_extra_body(),
+                                    ),
+                                    usage_limits=UsageLimits(request_limit=1),
+                                )
+                            except Exception as degrade_exc:  # noqa: BLE001
+                                log_spiral_redraw(
+                                    phase="T0",
+                                    pr_number=pr_number,
+                                    turn=redraw_from_turn,
+                                    outcome="degraded_failed",
+                                    log=gha_log,
+                                    detail=f'"{degrade_exc!s:.120}"',
+                                )
+                            else:
+                                result = degraded
+                                try:
+                                    messages = list(degraded.all_messages())
+                                except Exception:  # noqa: BLE001
+                                    pass
+                                log_spiral_redraw(
+                                    phase="T0",
+                                    pr_number=pr_number,
+                                    turn=redraw_from_turn,
+                                    outcome="recovered_degraded",
+                                    log=gha_log,
+                                )
+                    else:
+                        redraw_messages = list(redraw.all_messages())
+                        # Fold the re-draw's own dispatches into the
+                        # shared accounting — `agent.run` drives its loop
+                        # outside `iter_with_turn_logging`, so nothing
+                        # else counts them.
+                        for name in _spiral.tool_call_names(
+                            redraw_messages, start=len(prefix)
+                        ):
+                            tool_call_counter[name] = (
+                                tool_call_counter.get(name, 0) + 1
+                            )
+                            try:
+                                budget.add_tool_call(name)
+                            except Exception:  # noqa: BLE001
+                                pass
+                        result = redraw
+                        messages = redraw_messages
+                        log_spiral_redraw(
+                            phase="T0",
+                            pr_number=pr_number,
+                            turn=redraw_from_turn,
+                            outcome="recovered",
+                            log=gha_log,
+                            redraw_tool_calls=len(
+                                _spiral.tool_call_names(
+                                    redraw_messages, start=len(prefix)
+                                )
+                            ),
+                        )
     except Exception as exc:  # noqa: BLE001
         # If a wall_time / max_iterations trip already set the reason
         # inside the inner handler, preserve it — the framework's
@@ -678,6 +931,20 @@ async def deep_review_call(
             f"agent context cleanup raised after {early_terminated_reason} "
             f"trip — suppressing: {exc!r}"
         )
+
+    # Rung two. A re-draw that was skipped (nothing committed to re-send)
+    # or came back empty hands the working state to the bounded
+    # conclude-now recovery, when the deployment has opted into it.
+    if (
+        redraw_from_turn is not None
+        and result is None
+        and spiral_on
+        and spiral_messages is None
+    ):
+        from cora.core import spiral as _spiral
+
+        if _spiral.is_reasoning_spiral(messages):
+            spiral_messages = messages
 
     # Bounded reasoning-spiral recovery (deep). When the inner handler
     # detected a thinking-only spiral, re-run the SAME agent ONCE with the
@@ -733,6 +1000,28 @@ async def deep_review_call(
                 tools_available,
                 messages,
             )
+
+    # Re-draw exhausted (and any bounded recovery declined or failed).
+    # Fall back to whatever the spiralled turn managed to say: a review
+    # truncated mid-sentence is what this path produced before the
+    # re-draw existed, and it beats dropping the review entirely. Only a
+    # thinking-only turn has nothing to salvage.
+    if redraw_from_turn is not None and result is None and early_terminated_reason is None:
+        from cora.core import spiral as _spiral
+
+        salvage = _spiral.extract_final_text(messages)
+        if salvage.strip():
+            gha_log(
+                f"deep mode re-draw did not recover (PR #{pr_number}) — "
+                f"posting the truncated turn ({len(salvage)} chars)"
+            )
+            return salvage, None, tools_available, messages
+        return (
+            "",
+            "agent-loop-errored: spiral-redraw-exhausted",
+            tools_available,
+            messages,
+        )
 
     if early_terminated_reason is not None:
         return "", early_terminated_reason, tools_available, messages

@@ -25,6 +25,52 @@ from cora.result import ReviewResult
 from cora.review._state import ReviewRun
 
 
+def emit_finish(
+    run: ReviewRun,
+    *,
+    terminated_reason: str | None,
+    wall_time_s: float | None = None,
+    is_leak: bool = False,
+    leak_retry_state: str = "none",
+    preamble_chars: int = 0,
+) -> None:
+    """Write the single `agent_review finish` line for this review.
+
+    One line per review, on whichever path exits first — the normal
+    output pipeline, an early skip, a cancellation, or the SIGTERM
+    guard. Idempotent via `run.finish_emitted`, so the wrapper can call
+    it unconditionally on the way out without doubling up on the
+    happy path.
+
+    Every review MUST close its stream: a run that logged `turn 1` and
+    then nothing at all is indistinguishable from a run still in flight,
+    which makes "how many reviews died and how" unanswerable from the
+    logs. The skip/cancel paths carry zeros for the leak/preamble
+    fields rather than dropping them — the field set is a parsing
+    contract for downstream dashboards and must not vary by exit path.
+    """
+    if run.finish_emitted:
+        return
+    run.finish_emitted = True
+    budget = run.budget or Budget(max_input=0, max_output=0, max_iterations=0)
+    if wall_time_s is None:
+        wall_time_s = (time.monotonic() - run.start) if run.start else 0.0
+    finish_line = (
+        f"agent_review finish pr_number={run.pr_number} mode={run.mode} "
+        f"turns={budget.iterations} "
+        f"in_tokens={budget.input_used} out_tokens={budget.output_used} "
+        f"wall_s={wall_time_s:.1f} terminated={terminated_reason} "
+        f"resolved_model={budget.resolved_model or 'unknown'} "
+        f"leak={'true' if is_leak else 'false'} "
+        f"leak_retry={leak_retry_state} "
+        f"preamble_stripped={preamble_chars} "
+        f"reasoning_stripped={run.reasoning_stripped_chars} "
+        f"tools={dict(budget.tool_calls)}"
+    )
+    _gha_log(finish_line)
+    run.loki(finish_line, labels={"consumer": "pr-review", "kind": run.mode})
+
+
 async def quick_review_retry_for_format(
     *,
     llm_client,
@@ -242,20 +288,14 @@ async def produce_output(run: ReviewRun) -> ReviewResult | None:  # noqa: PLR091
 
     run.reasoning_stripped_chars = reasoning_stripped_chars
 
-    finish_line = (
-        f"agent_review finish pr_number={pr_number} mode={mode} "
-        f"turns={budget.iterations} "
-        f"in_tokens={budget.input_used} out_tokens={budget.output_used} "
-        f"wall_s={wall_time_s:.1f} terminated={terminated_reason} "
-        f"resolved_model={budget.resolved_model or 'unknown'} "
-        f"leak={'true' if is_leak else 'false'} "
-        f"leak_retry={leak_retry_state} "
-        f"preamble_stripped={preamble_chars} "
-        f"reasoning_stripped={reasoning_stripped_chars} "
-        f"tools={dict(budget.tool_calls)}"
+    emit_finish(
+        run,
+        terminated_reason=terminated_reason,
+        wall_time_s=wall_time_s,
+        is_leak=is_leak,
+        leak_retry_state=leak_retry_state,
+        preamble_chars=preamble_chars,
     )
-    _gha_log(finish_line)
-    run.loki(finish_line, labels={"consumer": "pr-review", "kind": mode})
 
     # Context-tool counter trace (`agent-review-tools` consumer).
     tracked_tool_names = (

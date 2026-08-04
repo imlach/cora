@@ -27,6 +27,11 @@ _TIMEOUT_GUARD: dict[str, object] = {
     "budget": None,
     "start": None,
     "terminated_reason": None,
+    # `() -> None` closure that writes the `agent_review finish` line.
+    # Parked here because this is the one exit that never returns
+    # through the pipeline wrapper: the handler re-raises SIGTERM with
+    # default disposition and the process is gone.
+    "finish": None,
 }
 
 
@@ -37,6 +42,14 @@ def _finalize_check_on_signal() -> None:
     by a late signal. Split out from `_on_sigterm` so the finalize logic
     is unit-testable without the process-killing re-raise."""
     g = _TIMEOUT_GUARD
+    # Close the log stream first — cheapest of the two, and the one whose
+    # absence makes a hard kill look like a run that never ended.
+    finish = g.get("finish")
+    if callable(finish):
+        try:
+            finish()
+        except Exception as exc:  # noqa: BLE001
+            print(f"::warning::SIGTERM finish line failed: {exc}")
     reporter = g.get("reporter")
     if reporter is None or not reporter.check_open:
         return
@@ -72,7 +85,11 @@ def _arm_timeout_guard(reporter: Reporter) -> None:
     check exists. No-op off the main thread (signal handlers can't
     install there) — soft-fails like every other live-progress surface."""
     _TIMEOUT_GUARD.update(
-        reporter=reporter, budget=None, start=None, terminated_reason=None
+        reporter=reporter,
+        budget=None,
+        start=None,
+        terminated_reason=None,
+        finish=None,
     )
     try:
         signal.signal(signal.SIGTERM, _on_sigterm)
