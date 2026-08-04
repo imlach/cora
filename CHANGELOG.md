@@ -16,6 +16,19 @@ verdict is now a signal the loop acts on, instead of a call the per-call
 timeout discards while it is still generating.
 
 ### Changed
+- **Deep mode no longer requires an MCP server** (#10). `MCP_URL` unset
+  (now the default — it was a `http://localhost:8080/mcp` placeholder) is
+  self-disarming: no probe, no toolset, and the agent loop runs on the
+  in-process `grep_repo`/`git_show` over the PR's own checkout. Deep mode
+  was previously unreachable without private infrastructure — the probe
+  failed against the placeholder and every deep run soft-skipped with
+  "MCP server unreachable", which is why the shipped adopter example
+  pins `MAX_TOOL_ITERATIONS=0`. A *configured* server that is unreachable
+  still fails the review: silently dropping tools someone asked for is
+  the worse failure. The comment footer's tool denominator no longer
+  counts MCP-served read tools when no server was attached.
+  **Deployments that relied on the localhost default must now set
+  `MCP_URL` explicitly.**
 - **The deep per-call completion ceiling drops 32K → 18K**, and is now
   env-settable as `AGENT_REVIEW_MAX_COMPLETION_TOKENS`. It is sized
   against `AGENT_REVIEW_PER_CALL_TIMEOUT_S`, not against the context
