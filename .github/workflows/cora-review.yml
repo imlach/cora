@@ -176,16 +176,6 @@ jobs:
           # Quick mode ignores both.
           T0_WALL_TIME_S: "360"
           T1_WALL_TIME_S: ${{ steps.mode.outputs.t1_wall_time_s }}
-          # MCP + retrieval endpoints from repo secrets (masked in public
-          # logs); unset → the engine's localhost defaults, and deep mode
-          # soft-skips on the probe. The knowledge corpus documents cora's
-          # own design, so retrieval is relevant for dogfood too.
-          MCP_URL: ${{ secrets.CORA_MCP_URL }}
-          QDRANT_URL: ${{ secrets.CORA_QDRANT_URL }}
-          TEI_URL: ${{ secrets.CORA_TEI_URL }}
-          RERANKER_URL: ${{ secrets.CORA_RERANKER_URL }}
-          QDRANT_COLLECTION: ${{ secrets.CORA_QDRANT_COLLECTION }}
-          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           # Bearer token for the MCP server (deep mode). Unset → no auth
           # headers are sent.
           MCP_TOKEN: ${{ secrets.CORA_MCP_TOKEN }}
