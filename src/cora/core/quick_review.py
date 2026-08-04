@@ -61,6 +61,10 @@ async def quick_review_call(
         # `retries=1` matches the existing leak-retry budget — no
         # tool-call retries because quick mode doesn't expose tools.
         retries=1,
+        # Quick mode is single-shot, so affinity buys nothing today —
+        # but the leak-retry turn is a second call over the same
+        # context, and every tier should look the same to the gateway.
+        session_id=cfg.session_header if cfg is not None else None,
     )
     agent = make_review_agent(agent_config)
     # Quick mode's own (larger) output cap — single-shot, so reasoning +

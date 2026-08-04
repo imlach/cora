@@ -165,3 +165,56 @@ def test_make_review_agent_accepts_local_tools():
     )
     agent = make_review_agent(c)
     assert agent is not None
+
+
+# ── Session-affinity header ──────────────────────────────────────────
+
+
+def test_session_header_is_absent_unless_configured():
+    """No configured value must mean no header at all — an unconfigured
+    deployment's requests stay byte-identical to before the feature."""
+    from cora.core.agent import SESSION_HEADER, AgentConfig, make_review_agent
+
+    for session_id in (None, "", "   "):
+        agent = make_review_agent(
+            AgentConfig(
+                endpoint_base_url="https://llm.example/v1",
+                api_key="k",
+                model_alias="review",
+                system_prompt="sys",
+                session_id=session_id,
+            )
+        )
+        client = agent.model.client._client
+        assert SESSION_HEADER not in client.headers
+
+
+def test_session_header_rides_every_model_call_when_set():
+    """The http client is the seam because it covers ALL model calls,
+    including the ones pydantic-ai issues internally."""
+    from cora.core.agent import SESSION_HEADER, AgentConfig, make_review_agent
+
+    agent = make_review_agent(
+        AgentConfig(
+            endpoint_base_url="https://llm.example/v1",
+            api_key="k",
+            model_alias="review",
+            system_prompt="sys",
+            session_id="pr-3305-run-7",
+        )
+    )
+    assert agent.model.client._client.headers[SESSION_HEADER] == "pr-3305-run-7"
+
+
+def test_session_header_env_treats_empty_as_unset():
+    from cora.config import ReviewerConfig
+
+    assert ReviewerConfig().session_header is None
+    assert ReviewerConfig.from_env({}).session_header is None
+    assert ReviewerConfig.from_env({"AGENT_REVIEW_SESSION_HEADER": ""}).session_header is None
+    assert (
+        ReviewerConfig.from_env(
+            {"AGENT_REVIEW_SESSION_HEADER": "pr-42"}
+        ).session_header
+        == "pr-42"
+    )

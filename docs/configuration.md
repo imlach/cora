@@ -44,6 +44,7 @@ for the Anthropic/Bedrock topology.
 | `AGENT_REVIEW_STALL_TIMEOUT_S` | Inter-delta silence that counts as a stall (default 30). Streaming only |
 | `AGENT_REVIEW_THINKING_BUDGET_TOKENS` | Reasoning deltas one turn may stream before it must commit to text or a tool call (default 10000). Streaming only |
 | `AGENT_REVIEW_SPIRAL_DEGRADE_THINKING` | `true` allows ONE bounded write-up turn with reasoning disabled after a payload has spiralled twice. Off by default — it costs review quality, so it is an explicit operator choice |
+| `AGENT_REVIEW_SESSION_HEADER` | Opaque per-review value sent as `x-review-session` on every model call. The client half of gateway session affinity: a gateway that hashes on it keeps one review's turns on one replica, so the prefix cache the early turns warmed still serves the later ones. Unset sends no header |
 
 ## Trigger Policy
 

@@ -291,6 +291,7 @@ async def continue_on_t1(
             tool_arg_defaults, git_provider=git_provider
         ),
         retries=1,
+        session_id=cfg.session_header if cfg is not None else None,
     )
     agent = make_review_agent(config)
 

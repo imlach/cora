@@ -418,6 +418,7 @@ async def deep_review_call(
         ),
         # Tool-call retries on transient MCP failures.
         retries=1,
+        session_id=cfg.session_header if cfg is not None else None,
     )
     agent = make_review_agent(config)
 

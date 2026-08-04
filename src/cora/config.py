@@ -231,6 +231,11 @@ class ReviewerConfig:
     # so existing REVIEWER_BROADEN_TOOLS deployments keep working.
     broaden_tools: bool = False
     per_call_timeout_s: float | None = None
+    # Opaque per-review session id sent as `x-review-session` on every
+    # model call. The client half of gateway session affinity — see
+    # `cora.core.agent.SESSION_HEADER`. None sends no header at all, so
+    # an unconfigured deployment is byte-identical to before.
+    session_header: str | None = None
     transcript_dir: str | None = None
     transcript_source: str = _c.DEFAULT_TRANSCRIPT_SOURCE
     eval_output_dir: str | None = None
@@ -340,6 +345,10 @@ class ReviewerConfig:
                 "REVIEWER_TRANSCRIPT_SOURCE", _c.DEFAULT_TRANSCRIPT_SOURCE
             ),
             eval_output_dir=get("AGENT_REVIEW_EVAL_OUTPUT_DIR"),
+            # Empty is treated as unset: a deployment that exports the
+            # variable but computes no value must send no header,
+            # not an empty one.
+            session_header=get("AGENT_REVIEW_SESSION_HEADER"),
             loop_guard_bot_login=get("AGENT_REVIEW_LOOP_GUARD_BOT_LOGIN"),
             max_tool_iterations=getint("MAX_TOOL_ITERATIONS", _c.DEFAULT_MAX_TOOL_ITERATIONS),
             # Per-call completion ceiling for the tier (deep) legs. Sized

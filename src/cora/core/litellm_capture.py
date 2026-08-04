@@ -86,7 +86,9 @@ async def _capture_response(response: httpx.Response) -> None:
         _captured = captured
 
 
-def build_capture_client() -> httpx.AsyncClient:
+def build_capture_client(
+    default_headers: dict[str, str] | None = None,
+) -> httpx.AsyncClient:
     """Build the `httpx.AsyncClient` to thread into `OpenAIProvider`.
 
     Returns a fresh client with `_capture_response` registered as the
@@ -94,8 +96,16 @@ def build_capture_client() -> httpx.AsyncClient:
     teardown); OpenAIProvider hands it to the underlying
     `openai.AsyncOpenAI` which does not close it on exit either, so
     the call site or its enclosing context manager is responsible.
+
+    `default_headers` are sent on every request the client makes — the
+    client is the only seam that covers *all* model calls, including the
+    ones the framework issues internally. Empty/None sends nothing, so
+    an unconfigured deployment's requests are byte-identical to before.
     """
-    return httpx.AsyncClient(event_hooks={"response": [_capture_response]})
+    return httpx.AsyncClient(
+        event_hooks={"response": [_capture_response]},
+        headers=default_headers or None,
+    )
 
 
 def drain_captured_headers() -> dict[str, str]:
