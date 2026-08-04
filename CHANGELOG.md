@@ -56,7 +56,7 @@ timeout discards while it is still generating.
   both were recorded as the same `per_call_timeout`. Adds
   `event=stall_detected` (no delta for `AGENT_REVIEW_STALL_TIMEOUT_S`,
   default 30) and `event=spiral_detected` (reasoning deltas past
-  `AGENT_REVIEW_THINKING_BUDGET_TOKENS`, default 10000, with nothing
+  `AGENT_REVIEW_THINKING_BUDGET_TOKENS`, default 16000, with nothing
   committed). Aborting cancels the in-flight request and commits
   nothing, so the history stays exactly at the payload the re-draw
   re-sends; a stall that happened mid-answer salvages its visible text
