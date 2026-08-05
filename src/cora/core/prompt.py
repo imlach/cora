@@ -144,9 +144,12 @@ def assemble_initial_user_prompt(
         # Grounding is the default framing (was the opt-in
         # REVIEWER_BROADEN_TOOLS teacher-trajectory variant; the old
         # "≤2 tool calls" default trained production reviews down to
-        # 82% zero-tool-call verdicts — the parallel-batching nudge, not
-        # a call cap, is what bounds wall time). `broaden_tools` is
-        # accepted as a no-op for env compat.
+        # 82% zero-tool-call verdicts). The counterweight is the
+        # context budget: unbounded validation saturated small-model
+        # context windows with repeated/bulk tool results, so the
+        # framing now pairs "validate every claim" with "each lookup
+        # targeted, no repeats, stop when verified". `broaden_tools`
+        # is accepted as a no-op for env compat.
         parts += [
             "",
             "## Your task",
@@ -159,10 +162,15 @@ def assemble_initial_user_prompt(
             "`search_cluster_docs` / `search_knowledge`; for a "
             "dependency bump, pull the upstream facts with "
             "`web_fetch_doc`. A claim you did not validate with a tool "
-            "call or a quoted hunk does not go in the review. Prefer "
-            "issuing independent lookups together in one turn (parallel "
-            "tool calls) over serializing them. Then produce the "
-            "markdown review per the system prompt's output format.",
+            "call or a quoted hunk does not go in the review. Your "
+            "context window is the budget: keep each lookup targeted "
+            "(tight globs, small size bounds, no whole-directory "
+            "crawls), never re-issue a call whose result is already "
+            "above, and prefer issuing independent lookups together in "
+            "one turn (parallel tool calls) over serializing them. "
+            "Once every finding is verified, stop calling tools and "
+            "produce the markdown review per the system prompt's "
+            "output format.",
         ]
     else:
         parts += [

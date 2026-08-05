@@ -39,6 +39,16 @@ def test_default_grounds_every_claim():
     assert "parallel tool calls" in p
 
 
+def test_grounding_carries_the_context_budget_counterweight():
+    # validate-everything without a context budget saturated small
+    # context windows (repeated / bulk tool results) — the framing
+    # pairs the grounding norm with targeted-lookup discipline.
+    p = _prompt()
+    assert "context window is the budget" in p
+    assert "never re-issue a call" in p
+    assert "stop calling tools" in p
+
+
 def test_broaden_flag_is_a_noop():
     assert _prompt(broaden_tools=True) == _prompt()
 
