@@ -448,6 +448,14 @@ def _slugify(heading: str) -> str:
 
 
 def _decisions_body(repo_root: Path, dec_id: str) -> str | None:
+    # Directory layout first: one file per decision under decisions/
+    # (`DEC-NNN-<slug>.md` or bare `DEC-NNN.md`). Monolithic
+    # DECISIONS.md is the fallback so both repo shapes resolve.
+    dec_dir = repo_root / "decisions"
+    if dec_dir.is_dir():
+        for p in sorted(dec_dir.glob(f"{dec_id}[-.]*")):
+            if p.suffix == ".md" and p.is_file():
+                return p.read_text(encoding="utf-8", errors="replace").strip("\n")
     p = repo_root / "DECISIONS.md"
     if not p.is_file():
         return None
