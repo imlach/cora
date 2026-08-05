@@ -9,6 +9,19 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 ## [Unreleased]
 
 ### Changed
+- **An exhausted reasoning spiral now escalates to T1 instead of
+  soft-failing** (#18). When a T0 draw spiralled and the bounded re-draw
+  spiralled again, the review ended as a cancelled check-run
+  (`agent-loop-errored: spiral-redraw-exhausted`, retry on next push).
+  The spiral is a property of the T0 reasoning model, not the PR — the
+  same argument the per-call-timeout fresh start already makes — so the
+  outcome is now a forced T1 entry: T1 resumes the committed trajectory
+  (the tool work T0 banked is kept; only the spiralled draw is dropped)
+  with a stalled-reasoning resume framing. A successful T1 body finishes
+  as `t1-spiral-escalation`; if T1 also fails, the original soft-fail
+  posture returns unchanged, as it does for every other
+  `agent-loop-errored` reason. Killswitch
+  `AGENT_REVIEW_SPIRAL_ESCALATION=false`.
 - **The deep prompt now frames the context window as the tool budget.**
   The validate-any-claim grounding (0.1.2) removed the tool-call cap
   entirely, and on deployments with small-context tier-0 models the
@@ -24,6 +37,11 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   every finding is verified.
 
 ### Fixed
+- **T2 disagreement tier attribution now covers every T1 entry path.**
+  The primary-tier label in the disagreement banner was matched against
+  a hand-picked pair of reasons, mislabelling `t1-per-call-retry` /
+  `t1-verdict-trigger` (and now `t1-spiral-escalation`) bodies as T0; it
+  now uses the shared `T1_TERMINATED_REASONS` set.
 - **`grep_repo` directory globs no longer silently match nothing.** The
   glob is fnmatch'd against the full repo-relative path, so a bare
   directory path (`pkg/sub/` or `pkg/sub`) selected zero files and the

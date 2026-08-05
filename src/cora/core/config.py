@@ -245,6 +245,20 @@ DEEP_MAX_OUTPUT_TOKENS = 18_000
 # wall budgets still bound it. Killswitch `AGENT_REVIEW_SPIRAL_REDRAW`.
 SPIRAL_REDRAW_ENABLED = True
 
+# ── Exhausted-spiral escalation ────────────────────────────────────
+# When the re-draw above ALSO spirals (`agent-loop-errored:
+# spiral-redraw-exhausted`), escalate the review to T1 instead of
+# soft-failing to a cancelled check-run. The spiral is a property of the
+# T0 reasoning model, not the PR — the same argument the per-call-timeout
+# fresh start already makes: a different endpoint rarely stalls the same
+# way. T1 resumes the committed trajectory (the tool work T0 banked),
+# dropping only the spiralled draw itself.
+#
+# Default-ON: it fires only on a review already lost, and the T1 leg is
+# bounded by its reserved wall window like every other forced entry.
+# Killswitch `AGENT_REVIEW_SPIRAL_ESCALATION`.
+SPIRAL_ESCALATION_ENABLED = True
+
 # ── Streaming detection ────────────────────────────────────────────
 # Consume tier model calls as delta streams. A non-streaming call is
 # opaque until it completes, so a model generating at full speed and a

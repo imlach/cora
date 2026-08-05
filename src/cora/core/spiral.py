@@ -29,6 +29,10 @@ drive the in-loop **re-draw**: re-send the identical payload once, no
 prompt perturbation, because the same draw usually succeeds on a second
 roll. Only when that also fails does the bounded conclude-now recovery
 above (`build_recovery_leadin`, opt-in) spend a differently-shaped call.
+With both rungs spent, the `spiral-redraw-exhausted` outcome is no
+longer terminal either: the tier dispatcher escalates it to T1 on the
+committed trajectory (`cfg.spiral_escalation`, default-ON) before the
+soft-fail runs.
 The re-draw needs no exception at all — it fires on the response
 boundary, which also catches the truncated-prose case that never makes
 pydantic-ai raise.

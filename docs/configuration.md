@@ -40,6 +40,7 @@ for the Anthropic/Bedrock topology.
 | `AGENT_REVIEW_PER_CALL_TIMEOUT_S` | Per-model-call timeout |
 | `AGENT_REVIEW_MAX_COMPLETION_TOKENS` | Per-call completion ceiling for the deep tier legs (T0/T1). Size it so one draw finishes inside `AGENT_REVIEW_PER_CALL_TIMEOUT_S` at your backend's generation rate — a draw that can't is cancelled mid-generation and records nothing |
 | `AGENT_REVIEW_SPIRAL_REDRAW` | Defaults to `true`; set `false` to disable the one-shot re-send when a turn hits the completion ceiling without committing to a tool call or a verdict |
+| `AGENT_REVIEW_SPIRAL_ESCALATION` | Defaults to `true`; set `false` to disable escalating to T1 when the re-draw also spirals. Off restores the soft-fail: cancelled check-run, retry on next push |
 | `AGENT_REVIEW_STREAM_DETECTION` | `true` consumes tier model calls as delta streams, so a stalled wire and a thinking model can be told apart while the call is in flight. Default off |
 | `AGENT_REVIEW_STALL_TIMEOUT_S` | Inter-delta silence that counts as a stall (default 30). Streaming only |
 | `AGENT_REVIEW_THINKING_BUDGET_TOKENS` | Reasoning deltas one turn may stream before it must commit to text or a tool call (default 16000). Streaming only |

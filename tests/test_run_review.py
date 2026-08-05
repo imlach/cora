@@ -336,6 +336,157 @@ def test_deep_skip_t0_starts_directly_on_t1(monkeypatch):
     assert result.tiers_run == ["core"]
 
 
+# ── Deep mode: exhausted spiral → forced T1 escalation ───────────────
+
+
+class _SpiralResponse:
+    """Duck-typed thinking-only ModelResponse stand-in — the spiralled
+    tail `committed_prefix` drops before the T1 handoff."""
+
+    kind = "response"
+    parts: list = []
+
+
+def test_deep_spiral_exhausted_escalates_to_t1(monkeypatch):
+    """The exhausted-spiral outcome is a forced T1 entry (default-ON, no
+    `t1_continuation` needed): T1 resumes the committed trajectory with
+    the spiralled draw dropped, and a T1 body adopts the
+    `t1-spiral-escalation` reason instead of the cancelled check-run."""
+    _patch_common(monkeypatch)
+    import cora.core.continuation as cont_mod
+    import cora.core.deep_review as deep_mod
+
+    t0_messages = [{"role": "user", "content": "review"}, _SpiralResponse()]
+
+    async def fake_deep(**kwargs):
+        return (
+            "",
+            "agent-loop-errored: spiral-redraw-exhausted",
+            ["grep_repo"],
+            t0_messages,
+        )
+
+    seen: dict = {}
+
+    async def fake_t1(**kwargs):
+        seen.update(kwargs)
+        return "🟡 minor\n\nRecovered on T1.", None, ["git_show"]
+
+    monkeypatch.setattr(deep_mod, "deep_review_call", fake_deep)
+    monkeypatch.setattr(cont_mod, "continue_on_t1", fake_t1)
+
+    cfg = _cfg(max_tool_iterations=12)
+    rep = RecordingReporter()
+    result = run_review(cfg, reporter=rep, retrieval=NullRetrievalProvider())
+
+    assert result.terminated_reason == "t1-spiral-escalation"
+    assert result.verdict == "minor"
+    assert result.conclusion == "neutral"
+    assert result.tiers_run == ["test-model", "core"]
+    # Trajectory resume, spiralled tail dropped: T1 sees the committed
+    # prefix with the stalled-reasoning framing, not a fresh start.
+    assert seen["prior_messages"] == t0_messages[:-1]
+    assert seen["initial_user_prompt"] is None
+    assert seen["resume_prompt"] == cont_mod.SPIRAL_ESCALATION_PROMPT
+    # No skip comment / cancelled check — the review completed.
+    assert rep.skips == []
+    assert rep.complete_calls[0]["conclusion"] == "neutral"
+
+
+def test_deep_spiral_exhausted_killswitch_restores_soft_fail(monkeypatch):
+    """`spiral_escalation=False` restores the pre-existing posture: no T1
+    dispatch, cancelled check-run, retry on next push."""
+    _patch_common(monkeypatch)
+    import cora.core.continuation as cont_mod
+    import cora.core.deep_review as deep_mod
+
+    async def fake_deep(**kwargs):
+        return (
+            "",
+            "agent-loop-errored: spiral-redraw-exhausted",
+            [],
+            [{"role": "user", "content": "review"}, _SpiralResponse()],
+        )
+
+    async def fake_t1(**kwargs):  # pragma: no cover — must not run
+        raise AssertionError("T1 must not be dispatched with the killswitch off")
+
+    monkeypatch.setattr(deep_mod, "deep_review_call", fake_deep)
+    monkeypatch.setattr(cont_mod, "continue_on_t1", fake_t1)
+
+    cfg = _cfg(max_tool_iterations=12, spiral_escalation=False)
+    rep = RecordingReporter()
+    result = run_review(cfg, reporter=rep, retrieval=NullRetrievalProvider())
+
+    assert result.conclusion == "cancelled"
+    assert result.terminated_reason == "agent-loop-errored"
+    assert any("Agent loop errored" in s for s in rep.skips)
+    assert result.tiers_run == ["test-model"]
+
+
+def test_deep_spiral_exhausted_t1_failure_keeps_soft_fail(monkeypatch):
+    """T1 also failing hands back the T0 reason, so the original
+    skip-class path (cancelled check-run) runs unmasked — the attempt is
+    still recorded in the tier trail."""
+    _patch_common(monkeypatch)
+    import cora.core.continuation as cont_mod
+    import cora.core.deep_review as deep_mod
+
+    async def fake_deep(**kwargs):
+        return (
+            "",
+            "agent-loop-errored: spiral-redraw-exhausted",
+            [],
+            [{"role": "user", "content": "review"}, _SpiralResponse()],
+        )
+
+    async def fake_t1(**kwargs):
+        return "", "wall_time", []
+
+    monkeypatch.setattr(deep_mod, "deep_review_call", fake_deep)
+    monkeypatch.setattr(cont_mod, "continue_on_t1", fake_t1)
+
+    cfg = _cfg(max_tool_iterations=12)
+    rep = RecordingReporter()
+    result = run_review(cfg, reporter=rep, retrieval=NullRetrievalProvider())
+
+    assert result.conclusion == "cancelled"
+    assert result.terminated_reason == "agent-loop-errored"
+    assert any("Agent loop errored" in s for s in rep.skips)
+    assert result.tiers_run == ["test-model", "core"]
+
+
+def test_deep_other_agent_loop_errors_keep_transient_posture(monkeypatch):
+    """Only the exhausted-spiral tag changes class — every other
+    `agent-loop-errored` reason stays transient-infra: no escalation,
+    cancelled check-run."""
+    _patch_common(monkeypatch)
+    import cora.core.continuation as cont_mod
+    import cora.core.deep_review as deep_mod
+
+    async def fake_deep(**kwargs):
+        return (
+            "",
+            "agent-loop-errored: RuntimeError('boom')",
+            [],
+            [{"role": "user", "content": "review"}],
+        )
+
+    async def fake_t1(**kwargs):  # pragma: no cover — must not run
+        raise AssertionError("generic loop errors must not escalate")
+
+    monkeypatch.setattr(deep_mod, "deep_review_call", fake_deep)
+    monkeypatch.setattr(cont_mod, "continue_on_t1", fake_t1)
+
+    cfg = _cfg(max_tool_iterations=12)
+    rep = RecordingReporter()
+    result = run_review(cfg, reporter=rep, retrieval=NullRetrievalProvider())
+
+    assert result.conclusion == "cancelled"
+    assert result.terminated_reason == "agent-loop-errored"
+    assert result.tiers_run == ["test-model"]
+
+
 def test_deep_t2_disagreement_via_cfg(monkeypatch):
     """`cfg.t2_disagreement` fires the second opinion (no env), the cfg
     t2 alias/cap reach the dispatch, and the gap=1 resolution adopts

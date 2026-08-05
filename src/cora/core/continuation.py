@@ -71,6 +71,18 @@ VERDICT_ESCALATION_PROMPT = (
     "reflecting your own judgement."
 )
 
+# Resume framing for an exhausted-spiral escalation: T0's reasoning
+# stalled twice on the same draw, so the next tier picks up the committed
+# trajectory (the caller drops the spiralled draw itself before the
+# handoff) and finishes the review on a different endpoint.
+SPIRAL_ESCALATION_PROMPT = (
+    "A stronger reviewer tier is taking over: the prior tier's reasoning "
+    "stalled before it could produce a verdict. The conversation above is "
+    "its working state — tool results and partial findings that remain "
+    "valid. Resume from where it left off, complete the analysis, then "
+    "emit the standard `Verdict:` line and review body."
+)
+
 _UNPROCESSED_TOOL_STUB = (
     "[no result — the prior tier hit its time/iteration budget before "
     "this tool call returned. Treat it as unavailable and continue "

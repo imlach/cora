@@ -43,9 +43,9 @@ def _default_policy(
     continuation tier exists only in deep mode with
     `cfg.t1_continuation` on, escalating on `cfg.escalation_triggers`
     (wall-hit by default). The forced T1 entries (`cfg.skip_t0`
-    classifier-large, and per_call_timeout with no committed messages)
-    bypass the policy by design — they escalate even when the ladder is
-    single-tier.
+    classifier-large, per_call_timeout with no committed messages, and
+    the exhausted-spiral escalation) bypass the policy by design — they
+    escalate even when the ladder is single-tier.
 
     Deep mode always carries the trajectory-resume
     `KvContinuationConnector` as the seam's default implementation — the
@@ -68,7 +68,8 @@ def _default_policy(
             connector=connector,
         )
     # Single-tier ladder: no triggered escalation, but the forced entries
-    # (skip_t0 / per-call fresh start) still use the KV connector.
+    # (skip_t0 / per-call fresh start / exhausted spiral) still use the
+    # KV connector.
     return EscalationPolicy(tiers=tiers, connector=connector)
 
 
@@ -344,21 +345,31 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
     # `should_escalate` intersects the tripped triggers with the
     # policy's `escalate_on` — wall-hit by default, optionally
     # blocker / low_confidence via `cfg.escalation_triggers`).
-    # Two forced entries bypass the policy by design:
+    # Three forced entries bypass the policy by design:
     #   - `classifier_large_start` (skip-T0 path) — T1 starts fresh;
     #   - `per_call_timeout` with NO model response — T0 hung before the
     #     model said anything, so there's no trajectory to resume; T1
     #     runs on a different endpoint and starts fresh.
+    #   - exhausted spiral (`cfg.spiral_escalation` killswitch) — T0's
+    #     draw spiralled and the bounded re-draw spiralled again. The
+    #     spiral is a property of the T0 reasoning model, not the PR, so
+    #     T1 resumes the committed trajectory instead of the review
+    #     soft-failing to a cancelled check-run. Other
+    #     `agent-loop-errored` reasons keep the transient-infra posture.
     #
     # The response test, not `not t0_messages`: pydantic-ai appends the
     # outgoing request to the history before awaiting the model, so the
     # history is never empty and the old emptiness guard never fired.
-    from cora.core.spiral import has_model_response
+    from cora.core.spiral import committed_prefix, has_model_response
 
     skip_t0_start = run.terminated_reason == "classifier_large_start"
     run.per_call_fresh_start = (
         run.terminated_reason == "per_call_timeout"
         and not has_model_response(t0_messages)
+    )
+    spiral_escalation = (
+        cfg.spiral_escalation
+        and run.terminated_reason == "agent-loop-errored: spiral-redraw-exhausted"
     )
     # Parse the T0 verdict up front so the blocker / low_confidence
     # triggers see it; the final parse for the posted comment happens
@@ -382,17 +393,29 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
     triggered_escalation = bool(t0_messages) and policy.should_escalate(
         _t0_interim, 0, blocker_word=cfg.verdict_words[2]
     )
-    if triggered_escalation or skip_t0_start or run.per_call_fresh_start:
+    if (
+        triggered_escalation
+        or skip_t0_start
+        or run.per_call_fresh_start
+        or spiral_escalation
+    ):
         # Hand off to the escalation connector. The default deep-mode
         # policy selects the trajectory-resume `KvContinuationConnector`;
         # the per-call dispatch surface rides in `EscalationContext.extra`
         # so the seam itself stays engine-free. `entry`/`tag` carry the
         # entry paths the connector maps onto the finish-line
         # `terminated_reason`.
+        prev_context = t0_messages
         if skip_t0_start:
             entry, tag = "fresh", "classifier_large"
         elif run.per_call_fresh_start:
             entry, tag = "fresh", "per_call_fresh"
+        elif spiral_escalation:
+            # Resume the committed trajectory — the tool work T0 banked
+            # before spiralling is real; only the spiralled draw itself
+            # (the uncommitted tail) is dropped before the handoff.
+            entry, tag = "wall_hit", "spiral_exhausted"
+            prev_context = committed_prefix(t0_messages)
         elif run.terminated_reason in WALL_HIT_REASONS:
             entry, tag = "wall_hit", "wall_hit"
         else:
@@ -404,7 +427,7 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
         )
         esc_ctx = EscalationContext(
             next_tier=t1_tier,
-            prev_context=t0_messages,
+            prev_context=prev_context,
             initial_user_prompt=run.initial_user_prompt,
             entry=entry,
             tag=tag,

@@ -173,6 +173,7 @@ class T2SecondOpinion(SecondOpinionProvider):
                 result.body = None
             else:
                 from cora.core.disagreement import TierVerdict, resolve_disagreement
+                from cora.core.kv_continuation import T1_TERMINATED_REASONS
                 from cora.core.t2_dispatch import compose_disagreement_body
 
                 t2_model = result.model_alias or (
@@ -180,8 +181,7 @@ class T2SecondOpinion(SecondOpinionProvider):
                 )
                 primary_tier_label = (
                     "T1"
-                    if primary_terminated_reason
-                    in ("t1-continuation", "t1-classifier-large")
+                    if primary_terminated_reason in T1_TERMINATED_REASONS
                     else "T0"
                 )
                 primary_verdict = parse_verdict_from_body(body_to_post)
