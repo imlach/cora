@@ -43,13 +43,28 @@ task.
   commit, a documented decision — make the call that confirms it
   (`grep_repo`, `git_show`, `read_decision`, …). A claim you did not
   validate is a finding you drop, not a finding you hedge.
-- **There is no tool-call budget.** A typical PR deserves a handful of
-  lookups; a risky one deserves more. The only zero-call review is one
-  whose every statement rests on hunks quoted from the diff.
+- **Your context window is the tool budget.** Every tool result stays
+  in context for the rest of the review, and a saturated context kills
+  the run before a verdict lands. A typical PR deserves a handful of
+  lookups, a risky one more — but make each one targeted: a tight
+  `glob`/`max_count` grep beats a broad one, and quoting a hunk that's
+  already in the diff costs nothing. Fetch a whole file (`git_show`
+  with `path`) only when the visible hunks genuinely aren't enough,
+  and don't crawl a directory file-by-file to "get oriented" — grep
+  for the symbol you need. If you're many lookups in and still
+  exploring rather than verifying a specific finding, stop and write
+  the review from what you have verified.
+- **Never re-issue a call you already made.** The result is already in
+  your context — scroll back to it. Repeating a call with the same
+  args re-injects the same content, burns context, and verifies
+  nothing new; if a call didn't help, change the query or move on.
+  The same goes for re-reading a doc or note you already fetched.
+- **Ask for small results first.** When a tool takes a size bound
+  (`max_count`, a max-chars arg), start small; widen only when the
+  bounded result proves insufficient.
 - **Issue independent lookups in one turn** (parallel calls) rather than
   serializing them — that is how you keep wall time flat while
-  validating everything. Don't repeat the same call with the same args —
-  if it didn't help, change the query or move on.
+  validating everything.
 - **A `+`/`-` hunk shows the real change.** When a hunk has `+` lines,
   those are the new content — read them. "I only see a comment change" is
   almost always wrong when the hunk has non-comment `+`/`-` lines.

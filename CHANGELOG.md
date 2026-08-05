@@ -8,6 +8,21 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Changed
+- **The deep prompt now frames the context window as the tool budget.**
+  The validate-any-claim grounding (0.1.2) removed the tool-call cap
+  entirely, and on deployments with small-context tier-0 models the
+  swing overshot: reviews saturated the context window with bulk
+  whole-file reads and re-issued identical calls (the same
+  large-`max_chars` doc fetch re-injected on six consecutive turns was
+  the observed worst case), dying in context-length errors before a
+  verdict landed. The grounding norm is unchanged — unverified claims
+  still get dropped — but the prompt now pairs it with lookup
+  discipline: targeted globs and small size bounds first, whole-file
+  reads only when the hunks aren't enough, never re-issuing a call
+  whose result is already in context, and stopping exploration once
+  every finding is verified.
+
 ### Fixed
 - **`grep_repo` directory globs no longer silently match nothing.** The
   glob is fnmatch'd against the full repo-relative path, so a bare
