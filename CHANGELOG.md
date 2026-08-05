@@ -8,6 +8,24 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-05
+
+A review that stalls now recovers instead of dying, and the reviewer
+stops mistaking its own tools' blind spots for facts about the PR:
+spiralled reasoning escalates to T1, the deep prompt budgets its context
+instead of saturating it, and both known PR-blindness traps (directory
+globs matching nothing, doc-lookup reading the base-branch index) no
+longer produce confident wrong findings.
+
+### Added
+- **ADR bodies split one-file-per-decision now resolve** (#13).
+  `decision:` payloads resolved only from a monolithic `DECISIONS.md`;
+  repos that split the log into a `decisions/` directory
+  (`DEC-NNN-<slug>.md` or bare `DEC-NNN.md`) had every lookup silently
+  resolve to nothing. Resolution is now directory-first with the
+  monolith as fallback, so both shapes — including mid-transition, when
+  both exist — work.
+
 ### Changed
 - **An exhausted reasoning spiral now escalates to T1 instead of
   soft-failing** (#18). When a T0 draw spiralled and the bounded re-draw
@@ -50,6 +68,14 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   globs now search the directory's subtree, and any glob that selects
   zero files carries an explicit `note` in the envelope so the model can
   tell a mis-aimed glob from a genuine no-match.
+- **Doc-lookup tools no longer produce false "missing file" blockers on
+  PR-added docs** (#20). `read_note`/`search_knowledge` query the
+  deployed docs index, which is built from the base branch — so a PR
+  referencing a doc it itself adds was blocked with a spurious 🔴
+  "file does not exist". The prompts now state the tools' base-branch
+  scope and direct existence checks for PR-referenced files at the PR
+  checkout (`git_show`/`grep_repo`), the same PR-blindness rule
+  `LOCAL_REPO_TOOLS` already established.
 
 ## [0.1.3] - 2026-08-04
 
@@ -239,5 +265,9 @@ evolution summarised below and in the module docstrings.
   embed the `Authorization` header value; header values are redacted and
   the message is length-capped.
 
-[Unreleased]: https://github.com/imlach/cora/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/imlach/cora/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/imlach/cora/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/imlach/cora/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/imlach/cora/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/imlach/cora/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/imlach/cora/releases/tag/v0.1.0
