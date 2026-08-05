@@ -313,6 +313,31 @@ def test_verdict_trigger_resumes_with_second_look_framing(monkeypatch):
     assert t1_kwargs["resume_prompt"] == cont.VERDICT_ESCALATION_PROMPT
 
 
+def test_spiral_exhausted_resumes_with_stall_framing(monkeypatch):
+    """An exhausted-spiral entry resumes the committed trajectory with the
+    stalled-reasoning lead-in and maps to the `t1-spiral-escalation`
+    reason."""
+    import cora.core.continuation as cont
+
+    t1_kwargs: dict = {}
+    prev = [{"role": "assistant", "content": "t0"}]
+    extra, _ = _extra(
+        monkeypatch,
+        t1_kwargs=t1_kwargs,
+        t1_return=("🟢 ok\n\nRecovered on T1.", None, []),
+    )
+    ctx = _ctx(extra, entry="wall_hit", tag="spiral_exhausted",
+               terminated_reason="agent-loop-errored: spiral-redraw-exhausted",
+               prev=prev)
+
+    out = asyncio.run(KvContinuationConnector().escalate(ctx, _never))
+
+    assert out.terminated_reason == "t1-spiral-escalation"
+    assert t1_kwargs["prior_messages"] is prev
+    assert t1_kwargs["initial_user_prompt"] is None
+    assert t1_kwargs["resume_prompt"] == cont.SPIRAL_ESCALATION_PROMPT
+
+
 def test_wall_hit_keeps_default_resume_framing(monkeypatch):
     """The wall-hit entry keeps the budget-continuation lead-in (no
     resume_prompt override)."""

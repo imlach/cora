@@ -23,6 +23,8 @@ on the context distinguishes the three entry paths so the finish-line
   - wall-hit resume         → ``t1-continuation``
   - large-diff direct start → ``t1-classifier-large``
   - per-call fresh start    → ``t1-per-call-retry``
+  - verdict-trigger resume  → ``t1-verdict-trigger``
+  - exhausted-spiral resume → ``t1-spiral-escalation``
 """
 
 from __future__ import annotations
@@ -41,6 +43,7 @@ _T1_SUCCESS_REASON = {
     "per_call_fresh": "t1-per-call-retry",
     "wall_hit": "t1-continuation",
     "verdict_trigger": "t1-verdict-trigger",
+    "spiral_exhausted": "t1-spiral-escalation",
 }
 
 # Every `terminated_reason` that means "the posted body came from T1" —
@@ -112,6 +115,13 @@ class KvContinuationConnector(EscalationConnector):
                 f"(max_iterations={t1_max_iterations}, "
                 f"budget_s={t1_budget_s:.0f})"
             )
+        elif tag == "spiral_exhausted":
+            gha_log(
+                f"T0 exhausted its spiral re-draw; resuming the committed "
+                f"trajectory on T1 `{t1_model}` "
+                f"(max_iterations={t1_max_iterations}, "
+                f"budget_s={t1_budget_s:.0f})"
+            )
         else:
             gha_log(
                 f"T0 wall-hit ({ctx.terminated_reason}); escalating to T1 "
@@ -148,9 +158,13 @@ class KvContinuationConnector(EscalationConnector):
             gha_log=iter_log,
             # Verdict-triggered entries resume a *completed* trajectory —
             # frame the handoff as a second look, not a budget top-up.
+            # Exhausted-spiral entries resume a *stalled* one — frame it
+            # as picking up where the prior tier's reasoning stalled.
             resume_prompt=(
                 _continuation.VERDICT_ESCALATION_PROMPT
                 if tag == "verdict_trigger"
+                else _continuation.SPIRAL_ESCALATION_PROMPT
+                if tag == "spiral_exhausted"
                 else None
             ),
             cfg=x["cfg"],

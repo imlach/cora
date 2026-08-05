@@ -47,6 +47,10 @@ def test_defaults_mirror_engine_constants():
     assert d.context_injection_head == c.CONTEXT_INJECTION_HEAD
     assert d.context_injection_comments == c.CONTEXT_INJECTION_COMMENTS
     assert d.transcript_source == c.DEFAULT_TRANSCRIPT_SOURCE
+    # Exhausted-spiral escalation — on by default (killswitch), like the
+    # re-draw it backstops.
+    assert d.spiral_escalation == c.SPIRAL_ESCALATION_ENABLED
+    assert d.spiral_escalation is True
     # Spiral recovery — off by default so existing deployments keep
     # today's soft-fail bit-for-bit; bounds mirror the engine constants.
     assert d.spiral_recovery == c.SPIRAL_RECOVERY_ENABLED
@@ -99,6 +103,21 @@ def test_from_env_empty_is_safe():
     assert fe.wall_time_s == c.DEFAULT_WALL_TIME_S
     assert fe.use_github_review is False  # PR-Review opt-in stays off
     assert fe.spiral_recovery is False  # spiral recovery opt-in stays off
+
+
+def test_from_env_spiral_escalation_killswitch():
+    # Default-true killswitch: only the literal "false" (case-insensitive)
+    # disables — same typo-safe parse as AGENT_REVIEW_SPIRAL_REDRAW.
+    assert ReviewerConfig.from_env({}).spiral_escalation is True
+    assert ReviewerConfig.from_env(
+        {"AGENT_REVIEW_SPIRAL_ESCALATION": "false"}
+    ).spiral_escalation is False
+    assert ReviewerConfig.from_env(
+        {"AGENT_REVIEW_SPIRAL_ESCALATION": "FALSE"}
+    ).spiral_escalation is False
+    assert ReviewerConfig.from_env(
+        {"AGENT_REVIEW_SPIRAL_ESCALATION": "0"}
+    ).spiral_escalation is True   # typo-safe: stays enabled
 
 
 def test_from_env_spiral_recovery_opt_in():

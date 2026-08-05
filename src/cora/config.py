@@ -102,6 +102,12 @@ class ReviewerConfig:
     # `AGENT_REVIEW_SPIRAL_REDRAW=false`) — see
     # `core.config.SPIRAL_REDRAW_ENABLED`.
     spiral_redraw: bool = _c.SPIRAL_REDRAW_ENABLED
+    # ── Exhausted-spiral escalation ──────────────────────────────────
+    # Escalate to T1 when the re-draw above also spirals, instead of
+    # soft-failing to a cancelled check-run. Default-ON (killswitch
+    # `AGENT_REVIEW_SPIRAL_ESCALATION=false`) — see
+    # `core.config.SPIRAL_ESCALATION_ENABLED`.
+    spiral_escalation: bool = _c.SPIRAL_ESCALATION_ENABLED
     # ── Streaming detection (default-OFF) ────────────────────────────
     # Consume tier model calls as delta streams so a stall and a spiral
     # can be told apart while they happen. See
@@ -361,6 +367,9 @@ class ReviewerConfig:
             # the literal "false" disables), matching the other
             # reliability defaults.
             spiral_redraw=getflag_on("AGENT_REVIEW_SPIRAL_REDRAW"),
+            # Exhausted-spiral escalation — same default-true killswitch
+            # shape as the re-draw it backstops.
+            spiral_escalation=getflag_on("AGENT_REVIEW_SPIRAL_ESCALATION"),
             # Streaming detection — default-false gate (only the literal
             # "true" enables); its tunables tolerate empty → engine
             # default and are inert while the gate is off.

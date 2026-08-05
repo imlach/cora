@@ -348,7 +348,9 @@ async def deep_review_call(
       - Salvage: with both rungs spent, a turn that produced any visible
         text returns that text — a truncated review, which is what this
         path produced before either rung existed. Only a thinking-only
-        turn falls through to the `agent-loop-errored` soft-fail.
+        turn falls through to the `agent-loop-errored:
+        spiral-redraw-exhausted` outcome — which the tier dispatcher
+        escalates to T1 (`cfg.spiral_escalation`) before soft-failing.
     """
     from pydantic_ai import ModelSettings, UsageLimits
     from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
