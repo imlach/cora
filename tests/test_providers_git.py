@@ -29,6 +29,55 @@ def test_grep_repo_runs_against_the_provider_root(tmp_path: Path):
     assert data["matches"][0]["line"] == 2
 
 
+def _tree_with_subdir(tmp_path: Path) -> Path:
+    sub = tmp_path / "pkg" / "sub"
+    sub.mkdir(parents=True)
+    (sub / "mod.py").write_text("NEEDLE in subtree\n", encoding="utf-8")
+    (tmp_path / "top.py").write_text("NEEDLE at top\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_grep_repo_directory_glob_searches_the_subtree(tmp_path: Path):
+    """A bare directory path — with or without trailing "/" — must search
+    the directory's subtree, not full-match against file paths (which
+    silently scanned zero files and read as "code doesn't exist")."""
+    root = _tree_with_subdir(tmp_path)
+    for glob in ("pkg/sub/", "pkg/sub", "pkg/"):
+        data = json.loads(
+            LocalGitProvider(repo_root=root).grep_repo(
+                {"pattern": "NEEDLE", "glob": glob}
+            )
+        )
+        assert data["match_count"] == 1, glob
+        assert data["matches"][0]["path"] == "pkg/sub/mod.py"
+        assert "note" not in data
+
+
+def test_grep_repo_wildcard_free_file_glob_still_exact(tmp_path: Path):
+    root = _tree_with_subdir(tmp_path)
+    data = json.loads(
+        LocalGitProvider(repo_root=root).grep_repo(
+            {"pattern": "NEEDLE", "glob": "top.py"}
+        )
+    )
+    assert data["match_count"] == 1
+    assert data["matches"][0]["path"] == "top.py"
+
+
+def test_grep_repo_zero_file_glob_carries_a_note(tmp_path: Path):
+    """A glob that selects no files is a mis-aimed glob, not evidence of
+    absence — the envelope says so, so the model can re-aim."""
+    root = _tree_with_subdir(tmp_path)
+    data = json.loads(
+        LocalGitProvider(repo_root=root).grep_repo(
+            {"pattern": "NEEDLE", "glob": "no/such/dir/*"}
+        )
+    )
+    assert data["match_count"] == 0
+    assert data["files_scanned"] == 0
+    assert "zero files" in data["note"]
+
+
 def test_git_show_delegates_with_provider_root(monkeypatch, tmp_path: Path):
     captured: dict = {}
 

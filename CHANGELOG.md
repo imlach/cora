@@ -8,6 +8,16 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Fixed
+- **`grep_repo` directory globs no longer silently match nothing.** The
+  glob is fnmatch'd against the full repo-relative path, so a bare
+  directory path (`pkg/sub/` or `pkg/sub`) selected zero files and the
+  empty result read as "this code doesn't exist" — observed as a reviewer
+  wrongly concluding a PR-added directory had no manifests. Directory
+  globs now search the directory's subtree, and any glob that selects
+  zero files carries an explicit `note` in the envelope so the model can
+  tell a mis-aimed glob from a genuine no-match.
+
 ## [0.1.3] - 2026-08-04
 
 Reasoning spirals, detected rather than timed out. A turn that spends
