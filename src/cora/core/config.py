@@ -450,6 +450,12 @@ CI_LOG_TAIL_CHARS = 2_400
 # Live-infrastructure tools (kubectl_*, loki_query, prometheus_query,
 # pods_top, nodes_top) are excluded — reviewing a static diff doesn't
 # need live state. The triage agent gets a different set.
+#
+# These doc tools query an index built from the base branch at deploy
+# time, so they are PR-blind: a doc the PR adds is invisible to them
+# (observed false 🔴 — a "missing" runbook the PR itself added). The
+# prompts tell the reviewer to verify PR-added files via the local
+# grep_repo / git_show instead.
 READ_TOOLS = {
     "search_knowledge",
     "read_decision",
