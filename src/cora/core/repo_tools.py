@@ -52,6 +52,22 @@ def _is_binary(path: Path) -> bool:
         return True
 
 
+def _normalize_glob(glob: str, root: Path) -> str:
+    """Treat a directory glob as its whole subtree.
+
+    The glob is fnmatch'd against the FULL repo-relative path, so a bare
+    directory path ("pkg/sub/" or "pkg/sub") matches no file at all —
+    the search silently scans zero files and the model reads the empty
+    result as "this code doesn't exist" (observed against PR-added
+    directories). `*` in fnmatch crosses `/`, so `dir/*` covers the
+    subtree."""
+    if glob.endswith("/"):
+        return glob + "*"
+    if not any(c in glob for c in "*?[") and (root / glob).is_dir():
+        return glob + "/*"
+    return glob
+
+
 def local_grep_repo(args: dict, *, root: Path | None = None) -> str:
     """grep_repo over the checkout root (the PR merge tree). Python `re`,
     same output envelope as the MCP server's grep_repo so the agent's
@@ -80,6 +96,8 @@ def local_grep_repo(args: dict, *, root: Path | None = None) -> str:
                 f"ERROR: grep_repo: glob {glob!r} must be repo-relative "
                 "and may not contain '..'"
             )
+        if glob:
+            glob = _normalize_glob(glob, root)
     max_count = max(1, min(int(args.get("max_count") or 50), _GREP_HARD_MAX_COUNT))
     context_lines = max(
         0, min(int(args.get("context_lines") or 0), _GREP_CONTEXT_MAX)
@@ -137,19 +155,24 @@ def local_grep_repo(args: dict, *, root: Path | None = None) -> str:
                     truncated = True
                     break
 
-    return json.dumps(
-        {
-            "pattern": pattern,
-            "glob": glob,
-            "ref": "PR branch (merge ref) — the code under review",
-            "matches": matches,
-            "match_count": len(matches),
-            "truncated": truncated,
-            "files_scanned": files_scanned,
-            "files_matched": len(files_matched),
-        },
-        indent=2,
-    )
+    out = {
+        "pattern": pattern,
+        "glob": glob,
+        "ref": "PR branch (merge ref) — the code under review",
+        "matches": matches,
+        "match_count": len(matches),
+        "truncated": truncated,
+        "files_scanned": files_scanned,
+        "files_matched": len(files_matched),
+    }
+    if glob and files_scanned == 0:
+        # Distinguish "no matches" from "glob selected no files" — the
+        # former is evidence, the latter is a mis-aimed glob.
+        out["note"] = (
+            "glob selected zero files — it is fnmatch'd against the full "
+            "repo-relative path; use 'dir/*' for a subtree or check the path"
+        )
+    return json.dumps(out, indent=2)
 
 
 def local_git_show(args: dict, *, root: Path | None = None) -> str:

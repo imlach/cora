@@ -158,7 +158,8 @@ def _make_pydantic_ai_local_tools(
         Args:
             pattern: Python regular expression.
             glob: Optional repo-relative fnmatch glob to restrict
-                which paths are searched.
+                which paths are searched. A directory path (with or
+                without trailing "/") searches its whole subtree.
             max_count: Max matches (default 50, cap 500).
             context_lines: Lines of context each side (0-5, default 0).
         """
