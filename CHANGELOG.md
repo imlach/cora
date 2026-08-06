@@ -8,6 +8,23 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Added
+- **Per-result char cap on the in-process repo tools**
+  (`TOOL_RESULT_CHAR_CAP`, env `AGENT_REVIEW_TOOL_RESULT_CHAR_CAP`,
+  default 16 000 chars). `git_show` file content is head+tail truncated
+  with an explicit marker; `grep_repo` stops accumulating matches at the
+  same budget and says so in a `note`. Before this, a single whole-file
+  `git_show` on a large repo doc injected the entire file into one turn
+  (observed +45K tokens from one 155 KB read), saturating a small T0
+  context window and tripping the reasoning spiral — the
+  `result_char_cap` the config's budget math referenced was never
+  actually implemented.
+- **Duplicate-call guard on the local tools.** A byte-identical
+  `(tool, args)` repeat within one review returns a short stub pointing
+  at the earlier result instead of re-injecting it — a looping model
+  (same call pair re-issued on alternating turns) now pays for the
+  result once.
+
 ## [0.1.4] - 2026-08-05
 
 A review that stalls now recovers instead of dying, and the reviewer
