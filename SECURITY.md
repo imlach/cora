@@ -184,6 +184,19 @@ approval-label flow above instead.
   If you enable draft-fix PRs, that token also needs
   `contents: read/write` to create/update branches and
   `pull-requests: read/write` to open the draft PR.
+- **Filesystem read surface.** The local `grep_repo` / `git_show` tools
+  read from the checkout, which IS the reviewed PR's tree — so any path
+  the tools derive from repository content is attacker-influenced. Two
+  rules follow. A corpus root must be confined: `DEP_SOURCE_ROOTS` is
+  operator-set deployment config and trusted as given, but an
+  auto-detected root (`vendor/`, `node_modules/`) is refused when it is
+  a symlink or resolves outside the checkout — `Path.is_dir()` follows
+  symlinks and `os.walk` descends its top-level argument regardless of
+  `followlinks`, so `vendor -> /` would otherwise expose the runner
+  filesystem. And symlinks encountered during a walk are skipped rather
+  than followed. This matters because matched lines are quoted into a
+  public verdict comment: a read escape is a disclosure, not just a
+  traversal.
 - **Merge gating.** The verdict check-run concludes `cancelled` on a
   policy-denied run, so a required-check aggregator that gates on it
   (a required-check aggregator workflow) keeps blocking; a human

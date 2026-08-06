@@ -54,11 +54,33 @@ def _resolve_dep_source_roots(cfg: "ReviewerConfig", repo_root: Path) -> list[Pa
                     f"dropping: {root}"
                 )
         return resolved
-    return [
-        repo_root / d
-        for d in _c.DEP_SOURCE_AUTO_DIRS
-        if (repo_root / d).is_dir()
-    ]
+    return [r for d in _c.DEP_SOURCE_AUTO_DIRS
+            if (r := _contained_auto_root(repo_root, d)) is not None]
+
+
+def _contained_auto_root(repo_root: Path, name: str) -> Path | None:
+    """An auto-detected root, or None if it isn't a real directory inside
+    the checkout.
+
+    Auto-detection reads a path the REVIEWED PR controls, so unlike an
+    operator-set `DEP_SOURCE_ROOTS` entry it can't be trusted to point
+    where it appears to. `Path.is_dir()` follows symlinks and `os.walk`
+    descends its top-level argument regardless of `followlinks`, so a PR
+    adding `vendor -> /` would otherwise hand the model a greppable view
+    of the runner filesystem — and matched lines are quoted into a public
+    verdict comment. Require the real path to stay under the checkout."""
+    root = repo_root / name
+    if root.is_symlink() or not root.is_dir():
+        return None
+    try:
+        root.resolve().relative_to(repo_root.resolve())
+    except (ValueError, OSError):
+        print(
+            f"::warning::auto-detected dependency root {name} resolves "
+            "outside the checkout, ignoring"
+        )
+        return None
+    return root
 
 
 class GitProvider(ABC):

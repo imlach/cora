@@ -226,3 +226,78 @@ def test_grep_repo_corpus_envelope_unaffected(tmp_path: Path):
     assert "roots" not in out
     assert out["ref"] == "PR branch (merge ref) — the code under review"
     assert out["match_count"] == 1
+
+
+# ── deps scan cap counts CANDIDATE files, not walked entries ──────────
+# A dep tree runs to hundreds of thousands of files. Counting pre-glob let
+# unrelated files eat the whole budget, so a precisely targeted lookup
+# returned zero matches — while the truncation note advised narrowing the
+# glob, which could not help.
+
+
+def test_deps_scan_cap_does_not_starve_a_targeted_glob(tmp_path):
+    from cora.providers import LocalGitProvider
+
+    root = tmp_path / "deps"
+    noise = root / "noise"
+    noise.mkdir(parents=True)
+    for i in range(200):
+        (noise / f"f{i}.py").write_text("irrelevant\n", encoding="utf-8")
+    target = root / "wanted"
+    target.mkdir()
+    (target / "api.py").write_text("def NewClient(): pass\n", encoding="utf-8")
+
+    out = json.loads(
+        LocalGitProvider(
+            repo_root=tmp_path,
+            dep_source_roots=[root],
+            dep_source_max_files_scanned=10,
+        ).grep_repo(
+            {"pattern": "NewClient", "corpus": "deps", "glob": "wanted/*"}
+        )
+    )
+    assert out["match_count"] == 1, out
+    assert out["matches"][0]["content"].strip() == "def NewClient(): pass"
+
+
+def test_deps_traversal_ceiling_still_bounds_an_unmatched_glob(tmp_path):
+    """Counting post-glob must not make a no-match glob walk forever."""
+    from cora.providers import LocalGitProvider
+
+    root = tmp_path / "deps"
+    root.mkdir()
+    for i in range(300):
+        (root / f"f{i}.py").write_text("irrelevant\n", encoding="utf-8")
+
+    out = json.loads(
+        LocalGitProvider(
+            repo_root=tmp_path,
+            dep_source_roots=[root],
+            dep_source_max_files_scanned=5,
+        ).grep_repo(
+            {"pattern": "NewClient", "corpus": "deps", "glob": "nothing-matches/*"}
+        )
+    )
+    assert out["truncated"] is True
+    assert "traversal ceiling" in out["note"]
+
+
+def test_deps_walk_skips_symlinked_files(tmp_path):
+    from cora.providers import LocalGitProvider
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "creds.env").write_text("TOKEN=sentinel\n", encoding="utf-8")
+    root = tmp_path / "deps"
+    root.mkdir()
+    (root / "pkg.py").symlink_to(outside / "creds.env")
+
+    out = json.loads(
+        LocalGitProvider(
+            repo_root=tmp_path, dep_source_roots=[root]
+        ).grep_repo({"pattern": "sentinel", "corpus": "deps"})
+    )
+    # The envelope echoes the pattern back, so assert on the payload:
+    # nothing was opened, nothing matched.
+    assert out["matches"] == []
+    assert out["files_scanned"] == 0

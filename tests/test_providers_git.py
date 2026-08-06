@@ -262,3 +262,70 @@ def test_from_config_wires_dep_source_max_files_scanned(tmp_path: Path):
     cfg = ReviewerConfig(dep_source_max_files_scanned=7)
     provider = GitProvider.from_config(cfg)
     assert provider.dep_source_max_files_scanned == 7
+
+
+# ── auto-detected roots are PR-controlled — containment ────────────────
+# The checkout is the reviewed PR's merge ref, so `vendor/` and
+# `node_modules/` are paths the PR author writes. `Path.is_dir()` follows
+# symlinks and `os.walk` descends its top-level argument regardless of
+# `followlinks`, so without a containment check a PR adding `vendor -> /`
+# turns the deps corpus into a runner-filesystem grep whose hits are
+# quoted into a public verdict comment.
+
+
+def test_auto_detected_root_that_is_a_symlink_is_refused(tmp_path: Path):
+    from cora.providers.git import _resolve_dep_source_roots
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "creds.env").write_text("TOKEN=sentinel\n", encoding="utf-8")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "vendor").symlink_to(outside, target_is_directory=True)
+
+    cfg = ReviewerConfig()
+    assert _resolve_dep_source_roots(cfg, repo_root=repo) == []
+
+
+def test_auto_detected_symlink_escape_greps_nothing(tmp_path: Path):
+    """End-to-end: the sentinel must not come back through the tool."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "creds.env").write_text("TOKEN=sentinel\n", encoding="utf-8")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "node_modules").symlink_to(outside, target_is_directory=True)
+
+    from cora.providers.git import _resolve_dep_source_roots
+
+    roots = _resolve_dep_source_roots(ReviewerConfig(), repo_root=repo)
+    out = LocalGitProvider(repo_root=repo, dep_source_roots=roots).grep_repo(
+        {"pattern": "sentinel", "corpus": "deps"}
+    )
+    assert "sentinel" not in out
+
+
+def test_real_auto_detected_directory_is_still_used(tmp_path: Path):
+    """The guard must not disarm the feature for a genuine vendor dir."""
+    from cora.providers.git import _resolve_dep_source_roots
+
+    repo = tmp_path / "repo"
+    (repo / "vendor" / "pkg").mkdir(parents=True)
+    (repo / "vendor" / "pkg" / "api.go").write_text(
+        "func NewClient() {}\n", encoding="utf-8"
+    )
+    resolved = _resolve_dep_source_roots(ReviewerConfig(), repo_root=repo)
+    assert resolved == [repo / "vendor"]
+
+
+def test_explicit_roots_are_not_second_guessed(tmp_path: Path):
+    """An operator-set DEP_SOURCE_ROOTS entry is deployment config, not
+    PR-controlled — a symlinked module cache stays legitimate."""
+    from cora.providers.git import _resolve_dep_source_roots
+
+    real = tmp_path / "real-cache"
+    real.mkdir()
+    link = tmp_path / "gomodcache"
+    link.symlink_to(real, target_is_directory=True)
+    cfg = ReviewerConfig(dep_source_roots=(str(link),))
+    assert _resolve_dep_source_roots(cfg, repo_root=tmp_path) == [link]

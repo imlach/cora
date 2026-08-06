@@ -52,6 +52,10 @@ _GREP_SKIP_DIRS = frozenset(
 _DEP_GREP_SKIP_DIRS = frozenset(
     {".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache"}
 )
+# Traversal ceiling as a multiple of the candidate-file cap. Bounds a glob
+# that matches almost nothing against a huge corpus; see the two-bounds
+# comment in `local_grep_deps`.
+_DEP_TRAVERSAL_CAP_MULTIPLE = 20
 _GREP_SKIP_EXT = frozenset(
     {
         ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf",
@@ -110,6 +114,23 @@ def _normalize_glob(glob: str, root: Path) -> str:
     if not any(c in glob for c in "*?[") and (root / glob).is_dir():
         return glob + "/*"
     return glob
+
+
+def _glob_static_segments(glob: str) -> list[str]:
+    """Leading wildcard-free path segments of a glob.
+
+    `"github.com/pkg/errors/*"` → `["github.com", "pkg", "errors"]`;
+    `"*.go"` → `[]`. Lets the deps walk skip subtrees that cannot contain
+    a match instead of paying for them out of the scan budget — on a
+    module cache the difference is the whole feature working or not.
+    Stops at the first segment carrying a wildcard, so pruning never
+    excludes a directory the glob could still match."""
+    segments: list[str] = []
+    for seg in glob.split("/"):
+        if not seg or any(c in seg for c in "*?["):
+            break
+        segments.append(seg)
+    return segments
 
 
 def _parse_grep_query(args: dict) -> dict | str:
@@ -312,6 +333,17 @@ def local_grep_deps(
         else DEP_SOURCE_MAX_FILES_SCANNED
     )
 
+    # Two bounds, because they answer different questions. `cap` bounds
+    # how many CANDIDATE files (post-glob) get opened — the useful-work
+    # budget. `traversal_cap` bounds how many directory entries get
+    # looked at at all, so a glob that matches nothing still terminates
+    # on a hundreds-of-thousands-of-files module cache instead of walking
+    # it whole. Generous multiple: the traversal itself is cheap (stat,
+    # no read) next to opening and scanning a file.
+    traversal_cap = cap * _DEP_TRAVERSAL_CAP_MULTIPLE
+    entries_traversed = 0
+    traversal_cap_hit = False
+
     matches: list[dict] = []
     files_scanned = 0
     files_walked = 0
@@ -324,24 +356,52 @@ def local_grep_deps(
         if truncated:
             break
         root_glob = _normalize_glob(glob, root) if glob else None
+        static = _glob_static_segments(root_glob) if root_glob else []
         for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if d not in _DEP_GREP_SKIP_DIRS]
+            # Sorted so a cap-truncated result is reproducible: os.walk
+            # yields directories in filesystem order, which would make two
+            # reviews of one PR disagree about whether a symbol exists.
+            # Symlinked dirs are dropped — same containment reasoning as
+            # the auto-detected roots (providers/git.py).
+            dirnames[:] = sorted(
+                d for d in dirnames
+                if d not in _DEP_GREP_SKIP_DIRS
+                and not os.path.islink(os.path.join(dirpath, d))
+            )
+            rel_dir = os.path.relpath(dirpath, root)
+            depth = 0 if rel_dir == "." else len(rel_dir.split(os.sep))
+            if depth < len(static):
+                # Still inside the glob's wildcard-free prefix — only the
+                # one named directory can lead to a match.
+                dirnames[:] = [d for d in dirnames if d == static[depth]]
             if truncated:
                 break
             for fn in sorted(filenames):
                 if truncated:
                     break
+                entries_traversed += 1
+                if entries_traversed > traversal_cap:
+                    truncated = True
+                    traversal_cap_hit = True
+                    break
+                if os.path.splitext(fn)[1].lower() in _GREP_SKIP_EXT:
+                    continue
+                abs_path = Path(dirpath) / fn
+                if abs_path.is_symlink():
+                    continue
+                rel_to_root = os.path.relpath(abs_path, root)
+                if root_glob and not fnmatch.fnmatch(rel_to_root, root_glob):
+                    continue
+                # Counted AFTER the glob, not before: a dep tree runs to
+                # hundreds of thousands of files, so a pre-glob cap let
+                # unrelated files eat the whole budget and a precisely
+                # targeted lookup returned zero matches — while the note
+                # advised narrowing the glob, which could not help.
                 files_walked += 1
                 if files_walked > cap:
                     truncated = True
                     scan_cap_hit = True
                     break
-                if os.path.splitext(fn)[1].lower() in _GREP_SKIP_EXT:
-                    continue
-                abs_path = Path(dirpath) / fn
-                rel_to_root = os.path.relpath(abs_path, root)
-                if root_glob and not fnmatch.fnmatch(rel_to_root, root_glob):
-                    continue
                 try:
                     if abs_path.stat().st_size > _GREP_FILE_SIZE_MAX:
                         continue
@@ -403,10 +463,18 @@ def local_grep_deps(
     }
     if scan_cap_hit:
         out["note"] = (
-            f"dependency-corpus scan cap ({cap} files) reached — "
-            f"{files_scanned} files searched, {len(matches)} matches; "
+            f"dependency-corpus scan cap ({cap} candidate files) reached "
+            f"— {files_scanned} files searched, {len(matches)} matches; "
             "narrow with a tighter glob or pattern, or scope "
             "DEP_SOURCE_ROOTS to search more of the corpus"
+        )
+    elif traversal_cap_hit:
+        out["note"] = (
+            f"dependency-corpus traversal ceiling ({traversal_cap} "
+            f"entries) reached before the glob selected {cap} files — "
+            "the corpus is large and this glob matches little of it; "
+            "anchor the glob at the package subtree you mean "
+            "(e.g. 'pkgname/*'), or scope DEP_SOURCE_ROOTS"
         )
     elif budget_hit:
         out["note"] = (
