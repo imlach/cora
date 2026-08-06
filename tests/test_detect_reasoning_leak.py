@@ -563,3 +563,171 @@ def test_explicit_default_vocab_matches_implicit_default():
         assert parse_verdict_from_body(body) == parse_verdict_from_body(
             body, glyphs=c.VERDICT_GLYPHS, words=c.VERDICT_WORDS
         )
+
+
+# ---------------------------------------------------------------------------
+# detect_blocker — bullet-local retraction (cora#29's "Related" item)
+#
+# A model sometimes writes a `🚨 **Blocker:**` bullet and then, in the same
+# bullet, walks it back ("false alarm", "the code is fine"). The old
+# `detect_blocker` matched the marker text alone, so a retracted bullet
+# still paused automerge and counted toward `tier_verdict` telemetry.
+# These cover: a fully-retracted body (no blocker), a mixed body (still a
+# blocker — retraction must never hide a real one), a plain hedge (not a
+# retraction — still a blocker), the literal cora#25 phrasing, a bullet
+# that wraps onto a continuation line, and the deliberate choice to ignore
+# body-level reassurance text.
+# ---------------------------------------------------------------------------
+
+def test_retracted_only_body_has_no_blocker():
+    from cora.core.leak import detect_blocker
+    body = (
+        "🟡 minor\n\n"
+        "**Findings:**\n"
+        "- 🚨 **Blocker:** this looked like a SQL injection at first "
+        "glance, but it's parameterised — false alarm.\n"
+    )
+    assert detect_blocker(body) is False
+
+
+def test_retracted_plus_genuine_still_blocker():
+    from cora.core.leak import detect_blocker
+    body = (
+        "🔴 needs changes\n\n"
+        "**Findings:**\n"
+        "- 🚨 **Blocker:** this is a false alarm from the truncated diff "
+        "display — the code is fine.\n"
+        "- 🚨 **Blocker:** auth.go:44 — token comparison is not "
+        "constant-time.\n"
+    )
+    assert detect_blocker(body) is True
+
+
+def test_genuine_blocker_only_regression():
+    from cora.core.leak import detect_blocker
+    body = (
+        "🟡 minor\n\n"
+        "**Findings:**\n"
+        "- 🚨 **Blocker:** SQL built via string concatenation from a "
+        "request param — injectable.\n"
+    )
+    assert detect_blocker(body) is True
+
+
+def test_hedge_without_retraction_still_blocker():
+    from cora.core.leak import detect_blocker
+    # A hedge ("might be") is not a retraction — the finding is still
+    # live, and must not be discounted just because the model wasn't
+    # 100% certain.
+    body = (
+        "🟡 minor\n\n"
+        "- 🚨 **Blocker:** this might be a problem under concurrent "
+        "writes — worth a second look.\n"
+    )
+    assert detect_blocker(body) is True
+
+
+def test_cora_25_exact_phrasing_no_blocker():
+    # The exact retraction phrasing observed live on imlach/cora#25,
+    # paired with a non-blocking verdict word so the assertion exercises
+    # the blocker-bullet path specifically (a literal `needs changes`
+    # verdict word is a separate, untouched signal — see
+    # `detect_blocker`'s docstring).
+    from cora.core.leak import detect_blocker
+    body = (
+        "🟢 looks good\n\n"
+        "**Findings:**\n"
+        "- 🚨 **Blocker:** This is a false alarm from the truncated diff "
+        "display — the code is fine.\n\n"
+        "I have no actual blockers.\n"
+    )
+    assert detect_blocker(body) is False
+
+
+def test_multiline_bullet_retraction_found_on_continuation_line():
+    from cora.core.leak import detect_blocker
+    body = (
+        "🟡 minor\n\n"
+        "**Findings:**\n"
+        "- 🚨 **Blocker:** this looks concerning at first glance.\n"
+        "  Actually, on further review this is a false alarm — the code "
+        "is fine.\n"
+        "- 🚨 **Blocker:** real issue: missing null check on line 42.\n"
+    )
+    # The wrapped continuation line carries the retraction for bullet 1;
+    # bullet 2 is untouched by it and stays live.
+    assert detect_blocker(body) is True
+
+
+def test_multiline_bullet_all_retracted_no_blocker():
+    from cora.core.leak import detect_blocker
+    body = (
+        "🟡 minor\n\n"
+        "**Findings:**\n"
+        "- 🚨 **Blocker:** this looks concerning at first glance.\n"
+        "  Actually, on further review this is a false alarm — the code "
+        "is fine.\n"
+    )
+    assert detect_blocker(body) is False
+
+
+def test_body_level_reassurance_never_overrides_a_live_bullet():
+    # A body-level "no actual blockers" sentence is weaker evidence than a
+    # bullet-local retraction (it can't be tied to which finding it's
+    # about) — detect_blocker deliberately never consults it. A live,
+    # unretracted bullet still blocks even when the closing prose
+    # contradicts it.
+    from cora.core.leak import detect_blocker
+    body = (
+        "🟡 minor\n\n"
+        "**Findings:**\n"
+        "- 🚨 **Blocker:** auth.go:44 — token comparison is not "
+        "constant-time.\n\n"
+        "I have no actual blockers.\n"
+    )
+    assert detect_blocker(body) is True
+
+
+def test_needs_changes_verdict_word_still_blocks_regardless_of_bullets():
+    # The verdict-word signal is independent of bullet retraction by
+    # design (see detect_blocker's docstring) — a model that states its
+    # own verdict as `needs changes` is believed, even with zero blocker
+    # bullets in the body.
+    from cora.core.leak import detect_blocker
+    assert detect_blocker("🔴 needs changes\n\nNo findings section at all.")
+
+
+def test_retraction_phrase_narrowed_by_contrast_still_blocker():
+    from cora.core.leak import detect_blocker
+    # "X is fine, BUT Y is broken" narrows the finding, it doesn't
+    # withdraw it. Discounting this would silently drop a live blocker —
+    # the one failure mode the phrase set is tuned against.
+    body = (
+        "🟡 minor\n\n"
+        "- 🚨 **Blocker:** `parse()` raises on empty input. The "
+        "surrounding code is fine, but this path crashes in prod.\n"
+    )
+    assert detect_blocker(body) is True
+
+
+def test_contrast_after_not_a_problem_still_blocker():
+    from cora.core.leak import detect_blocker
+    body = (
+        "🟡 minor\n\n"
+        "- 🚨 **Blocker:** Slow for tiny inputs — not really a problem "
+        "there, however at 10k rows it OOMs.\n"
+    )
+    assert detect_blocker(body) is True
+
+
+def test_contrast_before_retraction_is_still_a_retraction():
+    from cora.core.leak import detect_blocker
+    # The guard only looks AFTER the retraction phrase: a contrast
+    # leading INTO the withdrawal ("looks broken, but ... false alarm")
+    # is the retraction standing, not a narrowing of it.
+    body = (
+        "🟢 looks good\n\n"
+        "- 🚨 **Blocker:** Looks broken at first, but on re-reading "
+        "this is a false alarm.\n"
+    )
+    assert detect_blocker(body) is False

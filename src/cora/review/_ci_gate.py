@@ -49,9 +49,11 @@ Design choices worth knowing:
   only) check-run write carry the post-gate verdict. A fully
   contradicted review therefore posts a non-blocking required check,
   not a red one. The automerge pause is deliberately NOT changed:
-  `_finalize.py`'s `detect_blocker` scans for the literal
-  `🚨 **Blocker:**` marker text, which this gate leaves in place (see
-  "Annotate, never delete" above), so a downgraded review still pauses
+  `_finalize.py`'s `detect_blocker` counts every `🚨 **Blocker:**`
+  bullet the model didn't retract in its own text, and this gate leaves
+  those bullets in place (see "Annotate, never delete" above) — its
+  harness note reads as a contradiction, not a retraction, so a
+  downgraded review still pauses
   automerge for human judgment — friction is the point there, and
   lifting it belongs to the human who reads the annotated findings,
   not to this heuristic.
