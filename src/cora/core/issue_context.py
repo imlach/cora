@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import subprocess
 from typing import TYPE_CHECKING, Callable
 
@@ -83,6 +84,11 @@ ISSUE_BLOCK_CHAR_CAP = 10_000
 # N comments" — exactly the ones most likely to carry acceptance
 # criteria and discussion, ahead of later back-and-forth.
 ISSUE_MAX_COMMENTS_FETCHED = 15
+
+# Per-`gh`-call wall bound. The prefetch runs inline in
+# `assemble_context`, before the first model call, so an unresponsive
+# API must not hold the whole review open to the job timeout.
+ISSUE_FETCH_TIMEOUT_S = 20
 
 
 _CLOSING_KEYWORDS = (
@@ -155,10 +161,29 @@ def _run_gh(cmd: list[str]) -> str | None:
     on any failure (missing token, network, non-zero exit) — issue
     context is always optional and must never break the review."""
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, check=False,
+            # Bounded: the prefetch blocks `assemble_context` for every
+            # review whose title/body mentions `#N`, so an unresponsive
+            # API would otherwise stall until the job timeout.
+            timeout=ISSUE_FETCH_TIMEOUT_S,
+        )
         if proc.returncode != 0:
+            # Surfaced, not silent: a missing `issues: read` scope 403s
+            # and would otherwise look identical to "no linked issue".
+            first_err = (proc.stderr or "").strip().splitlines()[:1]
+            print(
+                f"::warning::linked-issue fetch failed (exit "
+                f"{proc.returncode}): {first_err[0] if first_err else ''}"
+            )
             return None
         return proc.stdout
+    except subprocess.TimeoutExpired:
+        print(
+            f"::warning::linked-issue fetch timed out after "
+            f"{ISSUE_FETCH_TIMEOUT_S}s, continuing without"
+        )
+        return None
     except Exception:  # noqa: BLE001
         return None
 
@@ -207,6 +232,11 @@ def fetch_issue(
     except json.JSONDecodeError:
         return None
     if not isinstance(issue, dict) or "number" not in issue:
+        return None
+    if "pull_request" in issue:
+        # `/issues/{n}` serves PRs too — rendering one as "### #n — … "
+        # under a "Linked issue(s)" heading would misdescribe it, and a
+        # PR thread is not the acceptance-criteria source this fetches.
         return None
 
     comments_raw = run_gh(
@@ -323,16 +353,46 @@ def format_issue_context_block(
     return text
 
 
-def wrap_issue_context_block(content: str, *, repo: str, numbers: list[int]) -> str:
+_TAG = "untrusted-content"
+
+
+def neutralize_boundary_tags(text: str) -> str:
+    """Defang any literal `<untrusted-content …>` / `</untrusted-content>`
+    the fetched text contains, so it cannot forge the wrapper's boundary.
+
+    A wrapper alone is not containment: issue titles, bodies and comments
+    are world-writable on a public repo, so an issue carrying a literal
+    closing tag would end the block early and everything after it would
+    read as ordinary prompt text. Replacing `<` with its HTML entity
+    keeps the text readable (the model still sees what was written)
+    while making it inert as a boundary."""
+    return text.replace(f"</{_TAG}", f"&lt;/{_TAG}").replace(
+        f"<{_TAG}", f"&lt;{_TAG}"
+    )
+
+
+def wrap_issue_context_block(
+    content: str, *, repo: str, numbers: list[int], nonce: str | None = None,
+) -> str:
     """Wrap the rendered block as `<untrusted-content>` — see the
     module docstring for why this is always the untrusted form (never
     the gate's classified-clean `<external-content>`): nothing here
-    ran through a prompt-injection classifier, only `gh api`."""
+    ran through a prompt-injection classifier, only `gh api`.
+
+    Two independent defenses, because this content is attacker-authored
+    by design and one bypass costs the whole trust boundary:
+
+    1. The content is neutralized, so it carries no usable boundary tag.
+    2. The boundary itself carries a per-review random `id`, so even a
+       payload that defeated (1) cannot guess the terminator it needs.
+    """
     refs = ",".join(f"#{n}" for n in numbers)
+    nonce = nonce or secrets.token_hex(8)
     return (
-        f'<untrusted-content from="https://github.com/{repo}/issues" refs="{refs}">\n'
-        f"{content}\n"
-        "</untrusted-content>"
+        f'<{_TAG} id="{nonce}" '
+        f'from="https://github.com/{repo}/issues" refs="{refs}">\n'
+        f"{neutralize_boundary_tags(content)}\n"
+        f'</{_TAG} id="{nonce}">'
     )
 
 
