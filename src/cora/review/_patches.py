@@ -229,10 +229,12 @@ async def dispatch_patches(run: ReviewRun) -> None:  # noqa: PLR0915
                         mcp_actions_headers=run.mcp_actions_headers,
                         web_fetch_url=run.web_fetch_url,
                         web_fetch_headers=None,
+                        extra_sessions=cfg.mcp_servers,
                         allowed_tools=set(cfg.read_tools)
                         | set(cfg.action_tools)
                         | set(cfg.web_tools)
-                        | set(cfg.local_repo_tools),
+                        | set(cfg.local_repo_tools)
+                        | set(cfg.extra_tools),
                         tool_arg_defaults={
                             "web_fetch_doc": {"caller": "cora"},
                         },

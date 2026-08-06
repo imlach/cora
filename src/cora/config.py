@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cora.core import config as _c
+from cora.core.mcp_sessions import McpServerSpec
 from cora.trigger import TriggerPolicy
 
 if TYPE_CHECKING:
@@ -55,6 +56,22 @@ class ReviewerConfig:
     mcp_actions_url: str | None = None
     mcp_actions_token: str | None = None
     web_fetch_gate_url: str | None = None
+    # Generic extra MCP sessions (env `MCP_SERVERS`, a JSON array) —
+    # appended onto the three named slots above; see
+    # `cora.core.mcp_sessions.parse_mcp_servers_env` for the schema and
+    # `compose_mcp_sessions` for how they're merged with `mcp_url` /
+    # `mcp_actions_url` / `web_fetch_gate_url` into one session list every
+    # deep-mode dispatch site iterates over. Empty by default.
+    mcp_servers: tuple[McpServerSpec, ...] = ()
+    # CSV of extra tool names admitted through the MCP allow-set filter
+    # (`AGENT_REVIEW_EXTRA_TOOLS`) — extends, never replaces,
+    # `read_tools | action_tools | web_tools | local_repo_tools`. An
+    # `mcp_servers` session's tools would otherwise be silently dropped by
+    # `AgentConfig.mcp_allowed_tools`, since that allow-set is env-only
+    # (see the frozenset fields below). Local tool names still win any
+    # name collision — unchanged from `agent.py`'s local-tools-first
+    # registration order.
+    extra_tools: frozenset[str] = frozenset()
 
     # ── Prompts (None → cora's packaged generic default, loaded by
     #    `cora.core.prompt.load_system_prompt`; set a path to override
@@ -316,6 +333,17 @@ class ReviewerConfig:
         except ValueError:
             t1_max_iterations = _c.DEFAULT_T1_MAX_ITERATIONS
 
+        # Malformed `MCP_SERVERS` raises loudly (ValueError, uncaught) —
+        # a misconfigured deployment should fail at startup, not
+        # silently run with fewer tools than it asked for. See
+        # `cora.core.mcp_sessions.parse_mcp_servers_env`.
+        from cora.core.mcp_sessions import parse_mcp_servers_env
+
+        mcp_servers = parse_mcp_servers_env(e.get("MCP_SERVERS"), environ=e)
+        extra_tools = frozenset(
+            s.strip() for s in (e.get("AGENT_REVIEW_EXTRA_TOOLS") or "").split(",") if s.strip()
+        )
+
         cfg = cls(
             repo=get("GH_REPO") or get("GITHUB_REPOSITORY") or "",
             pr_number=get("PR_NUMBER") or "",
@@ -327,6 +355,8 @@ class ReviewerConfig:
             mcp_actions_url=get("MCP_ACTIONS_URL"),
             mcp_actions_token=get("MCP_ACTIONS_TOKEN"),
             web_fetch_gate_url=get("WEB_FETCH_GATE_URL"),
+            mcp_servers=mcp_servers,
+            extra_tools=extra_tools,
             check_run_name=get("REVIEW_CHECK_RUN_NAME", _c.CHECK_RUN_NAME),
             # Opt-in first-class PR Review. Default-false gate (only
             # the literal "true" enables); unset keeps the

@@ -148,6 +148,11 @@ class KvContinuationConnector(EscalationConnector):
             mcp_actions_headers=x["mcp_actions_headers"],
             web_fetch_url=x["web_fetch_url"],
             web_fetch_headers=x["web_fetch_headers"],
+            # `.get(..., ())` — defensive default so an `extra` bag built
+            # before this field existed (e.g. an older test fixture)
+            # still resumes T1 with zero extra sessions instead of a
+            # KeyError.
+            extra_sessions=x.get("extra_sessions", ()),
             allowed_tools=x["allowed_tools"],
             tool_arg_defaults=x["tool_arg_defaults"],
             max_iterations=t1_max_iterations,

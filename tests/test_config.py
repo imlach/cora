@@ -317,3 +317,55 @@ def test_from_env_rejects_unknown_escalation_trigger():
 
     with pytest.raises(ValueError, match="unknown escalation triggers"):
         ReviewerConfig.from_env({"CORA_ESCALATION_TRIGGERS": "wall_hit,bogus"})
+
+
+# ── Generic extra MCP sessions ─────────────────────────────────────────
+
+
+def test_from_env_defaults_mcp_servers_and_extra_tools_empty():
+    fe = ReviewerConfig.from_env({})
+    assert fe.mcp_servers == ()
+    assert fe.extra_tools == frozenset()
+    assert ReviewerConfig().mcp_servers == ()
+    assert ReviewerConfig().extra_tools == frozenset()
+
+
+def test_from_env_parses_mcp_servers_json():
+    import json
+
+    from cora.core.mcp_sessions import McpServerSpec
+
+    raw = json.dumps(
+        [
+            {
+                "name": "docs2",
+                "url": "https://mcp.example/docs",
+                "token_env": "DOCS2_TOKEN",
+                "required": False,
+            }
+        ]
+    )
+    fe = ReviewerConfig.from_env({"MCP_SERVERS": raw, "DOCS2_TOKEN": "sekret"})
+    assert fe.mcp_servers == (
+        McpServerSpec(
+            name="docs2",
+            url="https://mcp.example/docs",
+            headers={"Authorization": "Bearer sekret"},
+            required=False,
+        ),
+    )
+
+
+def test_from_env_malformed_mcp_servers_raises():
+    import pytest
+
+    with pytest.raises(ValueError, match="not valid JSON"):
+        ReviewerConfig.from_env({"MCP_SERVERS": "{not json"})
+
+
+def test_from_env_parses_extra_tools_csv():
+    fe = ReviewerConfig.from_env(
+        {"AGENT_REVIEW_EXTRA_TOOLS": "custom_tool_a, custom_tool_b ,"}
+    )
+    assert fe.extra_tools == frozenset({"custom_tool_a", "custom_tool_b"})
+    assert ReviewerConfig.from_env({}).extra_tools == frozenset()

@@ -24,7 +24,7 @@ policy scoping.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from cora.core import config as _c
 from cora.core.leak import (
@@ -37,6 +37,7 @@ from cora.second_opinion import SecondOpinionProvider, SecondOpinionResult
 
 if TYPE_CHECKING:
     from cora.config import ReviewerConfig
+    from cora.core.mcp_sessions import McpServerSpec
     from cora.providers.git import GitProvider
 
 
@@ -83,6 +84,7 @@ class T2SecondOpinion(SecondOpinionProvider):
         log: Callable[[str], None],
         iter_log: Callable[[str], None],
         primary_terminated_reason: str | None = None,
+        extra_sessions: "Sequence[McpServerSpec]" = (),
     ) -> SecondOpinionResult:
         # Resolve the alias once — the disagreement dispatch, its composition
         # banner, and the patch-escalation verifier all route to the same
@@ -113,10 +115,12 @@ class T2SecondOpinion(SecondOpinionProvider):
             mcp_actions_headers=mcp_actions_headers,
             web_fetch_url=web_fetch_url or None,
             web_fetch_headers=None,
+            extra_sessions=extra_sessions,
             allowed_tools=set(cfg.read_tools)
             | set(cfg.action_tools)
             | set(cfg.web_tools)
-            | set(cfg.local_repo_tools),
+            | set(cfg.local_repo_tools)
+            | set(cfg.extra_tools),
             tool_arg_defaults={
                 "web_fetch_doc": {"caller": "cora"},
             },

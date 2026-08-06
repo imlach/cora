@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from cora.core.budget import (
     T0_COLD_START_ALLOWANCE_S,
@@ -39,6 +39,7 @@ from cora.core.budget import (
 
 if TYPE_CHECKING:
     from cora.config import ReviewerConfig
+    from cora.core.mcp_sessions import McpServerSpec
     from cora.providers.git import GitProvider
 
 
@@ -226,10 +227,18 @@ def _loaded_tool_names(
     read_enabled: bool = True,
     actions_enabled: bool = False,
     web_enabled: bool = False,
+    # True when at least one non-legacy `MCP_SERVERS` session opened.
+    # Same session-level granularity as the three flags above — we
+    # don't introspect which tool came from which extra session
+    # (`probe_mcp_server` only returns pass/fail), so any opened extra
+    # session toggles the whole `extra_tools` allow-set on, mirroring
+    # how one `mcp-actions` session toggles the whole `ACTION_TOOLS` set.
+    extra_enabled: bool = False,
     read_tools: set[str] | frozenset[str] | None = None,
     local_repo_tools: set[str] | frozenset[str] | None = None,
     action_tools: set[str] | frozenset[str] | None = None,
     web_tools: set[str] | frozenset[str] | None = None,
+    extra_tools: set[str] | frozenset[str] | None = None,
 ) -> list[str]:
     """Return the tool names actually exposed for this review topology.
 
@@ -247,6 +256,7 @@ def _loaded_tool_names(
     )
     action_set = set(_c.ACTION_TOOLS if action_tools is None else action_tools)
     web_set = set(_c.WEB_TOOLS if web_tools is None else web_tools)
+    extra_set = set(extra_tools or ())
 
     loaded = set(allowed_tools) & local_set
     if read_enabled:
@@ -255,6 +265,8 @@ def _loaded_tool_names(
         loaded |= set(allowed_tools) & action_set
     if web_enabled:
         loaded |= set(allowed_tools) & web_set
+    if extra_enabled:
+        loaded |= set(allowed_tools) & extra_set
     return sorted(loaded)
 
 
@@ -286,6 +298,9 @@ async def deep_review_call(
     # Optional web-fetch gate (live web fetch).
     web_fetch_url: str | None = None,
     web_fetch_headers: dict[str, str] | None = None,
+    # Generic extra MCP sessions (from `MCP_SERVERS`) — appended after
+    # the three named slots above; see `cora.core.mcp_sessions`.
+    extra_sessions: "Sequence[McpServerSpec]" = (),
     # Allowlist filter applied to MCP toolsets.
     allowed_tools: set[str],
     # Tool-arg defaults (e.g. {"web_fetch_doc": {"caller": "cora"}}).
@@ -392,37 +407,34 @@ async def deep_review_call(
     # asks to be retried, and it keeps the Loki finish-line buckets +
     # verdict-line text stable.
     mcp_url = (mcp_url or "").strip()
-    read_enabled = bool(mcp_url)
-    mcp_servers: list[tuple[str, dict[str, str]]] = []
-    if read_enabled:
-        if not await _probe_mcp_server(mcp_url, mcp_headers, "mcp", gha_log):
-            return "", "mcp-connect-failed", [], []
-        mcp_servers.append((mcp_url, mcp_headers))
-    else:
+    if not mcp_url:
         gha_log(
             "no MCP server configured (MCP_URL unset) — deep mode running "
             "on local repo tools only"
         )
-    actions_enabled = False
-    web_enabled = False
 
-    if mcp_actions_url and mcp_actions_headers:
-        if await _probe_mcp_server(
-            mcp_actions_url, mcp_actions_headers, "mcp-actions", gha_log,
-        ):
-            mcp_servers.append((mcp_actions_url, mcp_actions_headers))
-            actions_enabled = True
-            gha_log("mcp-actions session opened (observe-only)")
-    elif mcp_actions_url:
-        gha_log("MCP_ACTIONS_TOKEN unset — skipping mcp-actions")
+    from cora.core.mcp_sessions import compose_mcp_sessions, open_mcp_sessions
 
-    if web_fetch_url:
-        if await _probe_mcp_server(
-            web_fetch_url, web_fetch_headers or {}, "web-fetch-gate", gha_log,
-        ):
-            mcp_servers.append((web_fetch_url, web_fetch_headers or {}))
-            web_enabled = True
-            gha_log("web-fetch-gate session opened")
+    configured_sessions = compose_mcp_sessions(
+        mcp_url=mcp_url,
+        mcp_headers=mcp_headers,
+        mcp_actions_url=mcp_actions_url,
+        mcp_actions_headers=mcp_actions_headers,
+        web_fetch_url=web_fetch_url,
+        web_fetch_headers=web_fetch_headers,
+        extra_sessions=extra_sessions,
+        log=gha_log,
+    )
+    opened = await open_mcp_sessions(
+        configured_sessions, probe=_probe_mcp_server, log=gha_log
+    )
+    if opened is None:
+        return "", "mcp-connect-failed", [], []
+    mcp_servers, sessions_opened = opened
+    read_enabled = "mcp" in sessions_opened
+    actions_enabled = "actions" in sessions_opened
+    web_enabled = "web-fetch" in sessions_opened
+    extra_enabled = bool(set(sessions_opened) - {"mcp", "actions", "web-fetch"})
 
     # Pydantic-AI's `Agent` enforces unique tool names across local +
     # MCP. Strip the locally-served names from the MCP allowlist so
@@ -485,10 +497,12 @@ async def deep_review_call(
         read_enabled=read_enabled,
         actions_enabled=actions_enabled,
         web_enabled=web_enabled,
+        extra_enabled=extra_enabled,
         read_tools=cfg.read_tools if cfg is not None else None,
         local_repo_tools=cfg.local_repo_tools if cfg is not None else None,
         action_tools=cfg.action_tools if cfg is not None else None,
         web_tools=cfg.web_tools if cfg is not None else None,
+        extra_tools=cfg.extra_tools if cfg is not None else None,
     )
     # Conversation history accumulator. Populated from `agent_run`
     # whether the run completes cleanly or trips `UsageLimitExceeded`

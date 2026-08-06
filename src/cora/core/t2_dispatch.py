@@ -25,12 +25,13 @@ look at manually — but no cloud call fires.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from cora.core.disagreement import Resolution
 
 if TYPE_CHECKING:
     from cora.config import ReviewerConfig
+    from cora.core.mcp_sessions import McpServerSpec
     from cora.providers.git import GitProvider
 
 
@@ -51,6 +52,9 @@ async def call_t2_alt_reviewer(
     mcp_actions_headers: dict[str, str] | None = None,
     web_fetch_url: str | None = None,
     web_fetch_headers: dict[str, str] | None = None,
+    # Generic extra MCP sessions (from `MCP_SERVERS`) — forwarded
+    # straight through to `deep_review_call`; see `cora.core.mcp_sessions`.
+    extra_sessions: "Sequence[McpServerSpec]" = (),
     allowed_tools: set[str],
     tool_arg_defaults: dict[str, dict[str, Any]] | None = None,
     max_iterations: int = 8,
@@ -106,6 +110,7 @@ async def call_t2_alt_reviewer(
         mcp_actions_headers=mcp_actions_headers,
         web_fetch_url=web_fetch_url,
         web_fetch_headers=web_fetch_headers,
+        extra_sessions=extra_sessions,
         allowed_tools=allowed_tools,
         tool_arg_defaults=tool_arg_defaults,
         max_iterations=max_iterations,

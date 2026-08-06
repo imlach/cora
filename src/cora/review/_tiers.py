@@ -111,6 +111,7 @@ def _continuation_tier_runner(extra: dict):
             mcp_actions_headers=extra["mcp_actions_headers"],
             web_fetch_url=extra["web_fetch_url"],
             web_fetch_headers=extra["web_fetch_headers"],
+            extra_sessions=extra.get("extra_sessions", ()),
             allowed_tools=extra["allowed_tools"],
             tool_arg_defaults=extra["tool_arg_defaults"],
             max_iterations=tier.max_iterations,
@@ -240,11 +241,15 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
     # Shared T0/T1 dispatch surface — the same allow-set + tool defaults
     # feed `deep_review_call` and the escalation connector's
     # `continue_on_t1` so the two tiers see an identical tool topology.
+    # `extra_tools` (AGENT_REVIEW_EXTRA_TOOLS) admits names served by
+    # `cfg.mcp_servers` extra sessions, which the four static allow-sets
+    # above know nothing about.
     allowed_tools = (
         set(cfg.read_tools)
         | set(cfg.action_tools)
         | set(cfg.web_tools)
         | set(cfg.local_repo_tools)
+        | set(cfg.extra_tools)
     )
     tool_arg_defaults = {"web_fetch_doc": {"caller": "cora"}}
 
@@ -285,6 +290,7 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
             mcp_actions_headers=run.mcp_actions_headers,
             web_fetch_url=run.web_fetch_url,
             web_fetch_headers=None,
+            extra_sessions=cfg.mcp_servers,
             allowed_tools=allowed_tools,
             tool_arg_defaults=tool_arg_defaults,
             max_iterations=run.max_iterations,
@@ -446,6 +452,7 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
                 "mcp_actions_headers": run.mcp_actions_headers,
                 "web_fetch_url": run.web_fetch_url,
                 "web_fetch_headers": None,
+                "extra_sessions": cfg.mcp_servers,
                 "allowed_tools": allowed_tools,
                 "tool_arg_defaults": tool_arg_defaults,
                 "context_refresher": context_refresher,
@@ -587,6 +594,7 @@ async def second_opinion_dispatch(run: ReviewRun) -> None:
         mcp_actions_url=run.mcp_actions_url,
         mcp_actions_headers=run.mcp_actions_headers,
         web_fetch_url=run.web_fetch_url,
+        extra_sessions=run.cfg.mcp_servers,
         git=run.git,
         log=_gha_log,
         iter_log=run.iter_log,

@@ -37,10 +37,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 if TYPE_CHECKING:
     from cora.config import ReviewerConfig
+    from cora.core.mcp_sessions import McpServerSpec
     from cora.providers.git import GitProvider
 
 
@@ -113,6 +114,13 @@ class SecondOpinionProvider(ABC):
         log: Callable[[str], None],
         iter_log: Callable[[str], None],
         primary_terminated_reason: str | None = None,
+        # Generic extra MCP sessions (from `MCP_SERVERS`) — additive
+        # parameter, default `()` so an existing subclass's `dispatch()`
+        # override (or a stand-in that accepts `**kwargs`, like
+        # `NullSecondOpinion`) keeps working unchanged; only
+        # `T2SecondOpinion` (the shipped default) needs to read it. See
+        # `cora.core.mcp_sessions`.
+        extra_sessions: "Sequence[McpServerSpec]" = (),
     ) -> SecondOpinionResult:
         """Fire the second review. Returns a `SecondOpinionResult` whose
         `dispatched=True` and `body` carries the raw (pre-leak) body.
