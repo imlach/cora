@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -105,6 +106,17 @@ def parse_mcp_servers_env(
         url = str(entry.get("url") or "").strip()
         if not url:
             raise ValueError(f"MCP_SERVERS[{idx}] ({name}) is missing a non-empty 'url'")
+        # Scheme-checked HERE so a bad URL fails at config-parse time
+        # with the other schema errors. MCPToolset(...) raises "could
+        # not infer a valid transport" at CONSTRUCTION, which happens
+        # outside the probe's try — that escapes as an unhandled
+        # traceback and leaves the preflight check-run hung, instead of
+        # the graceful `mcp-connect-failed` an unreachable server gets.
+        if not url.startswith(("http://", "https://")):
+            raise ValueError(
+                f"MCP_SERVERS[{idx}] ({name}): 'url' must be http:// or "
+                f"https:// (got {url!r})"
+            )
         required = entry.get("required", False)
         if not isinstance(required, bool):
             raise ValueError(
@@ -118,9 +130,25 @@ def parse_mcp_servers_env(
             if token:
                 headers = {"Authorization": f"Bearer {token}"}
             else:
+                # Echo the NAME only when it looks like an env-var name
+                # by CONVENTION — upper-snake, bounded length. The field
+                # invites pasting a literal token where a variable name
+                # belongs, and this is the exact branch that path
+                # reaches; GHA masking only catches values registered as
+                # secrets of this workflow. A mere identifier check is
+                # not enough: real credentials (`ghp_…`, `sk-…`) are
+                # identifier-shaped too. Same posture as
+                # `mcp_probe._redact`, which never prints a header value.
+                shown = (
+                    f"'{token_env}'"
+                    if re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", token_env)
+                    else "(not an environment variable name by "
+                         "convention — did you paste a token instead of "
+                         "the NAME of the variable holding it?)"
+                )
                 print(
                     f"::warning::MCP_SERVERS[{idx}] ({name}): token_env "
-                    f"'{token_env}' is unset — connecting without auth"
+                    f"{shown} is unset — connecting without auth"
                 )
         specs.append(McpServerSpec(name=name, url=url, headers=headers, required=required))
     return tuple(specs)
@@ -186,7 +214,35 @@ def compose_mcp_sessions(
             )
         )
 
-    sessions.extend(extra_sessions)
+    # Drop extras that collide with an already-claimed name or URL,
+    # rather than letting both attach. `opened` is name-keyed, so two
+    # same-named sessions silently collapse there — and if they serve
+    # any tool name in common, pydantic-ai's CombinedToolset raises
+    # UserError on the FIRST duplicate, which surfaces as
+    # `agent-loop-errored:` with no review posted. That is exactly what
+    # the documented `web-fetch` name convention produces when
+    # WEB_FETCH_GATE_URL is also set, and what a second knowledge base
+    # re-serving `search_knowledge` would produce. Dropping loses one
+    # optional session; not dropping loses the whole review.
+    claimed_names = {s.name for s in sessions}
+    claimed_urls = {s.url for s in sessions}
+    for spec in extra_sessions:
+        if spec.name in claimed_names:
+            log(
+                f"MCP_SERVERS entry '{spec.name}' duplicates an already-"
+                "configured session name — skipping (rename it to attach "
+                "both)"
+            )
+            continue
+        if spec.url in claimed_urls:
+            log(
+                f"MCP_SERVERS entry '{spec.name}' duplicates an already-"
+                f"configured session URL — skipping"
+            )
+            continue
+        claimed_names.add(spec.name)
+        claimed_urls.add(spec.url)
+        sessions.append(spec)
     return sessions
 
 

@@ -369,3 +369,103 @@ def test_resolve_falls_back_to_named_extra_session():
 
 def test_resolve_returns_empty_when_neither_configured():
     assert resolve_web_fetch_url(_FakeCfg()) == ""
+
+
+# ── collisions between an extra and an already-claimed slot ──────────
+# `opened` is name-keyed so two same-named sessions silently collapse
+# there, and pydantic-ai's CombinedToolset raises UserError on the first
+# duplicate TOOL name across toolsets — surfacing as `agent-loop-errored:`
+# with no review posted. The documented `web-fetch` name convention hits
+# this the moment WEB_FETCH_GATE_URL is also set.
+
+
+def _compose(**kw):
+    base = dict(
+        mcp_url="https://mcp.example",
+        mcp_headers={},
+        mcp_actions_url=None,
+        mcp_actions_headers=None,
+        web_fetch_url=None,
+        web_fetch_headers=None,
+    )
+    base.update(kw)
+    return compose_mcp_sessions(**base)
+
+
+def test_extra_named_like_a_legacy_slot_is_dropped():
+    sessions = _compose(
+        web_fetch_url="https://gate.example",
+        web_fetch_headers={},
+        extra_sessions=(
+            McpServerSpec(name="web-fetch", url="https://other.example"),
+        ),
+    )
+    assert [s.name for s in sessions] == ["mcp", "web-fetch"]
+    assert [s.url for s in sessions] == ["https://mcp.example", "https://gate.example"]
+
+
+def test_extra_duplicating_a_url_is_dropped():
+    sessions = _compose(
+        extra_sessions=(McpServerSpec(name="alias", url="https://mcp.example"),),
+    )
+    assert [s.name for s in sessions] == ["mcp"]
+
+
+def test_two_extras_with_the_same_name_keep_only_the_first():
+    sessions = _compose(
+        extra_sessions=(
+            McpServerSpec(name="docs2", url="https://a.example"),
+            McpServerSpec(name="docs2", url="https://b.example"),
+        ),
+    )
+    assert [s.name for s in sessions] == ["mcp", "docs2"]
+    assert sessions[1].url == "https://a.example"
+
+
+def test_distinct_extras_still_attach():
+    """The guard must not disarm the feature it's protecting."""
+    sessions = _compose(
+        extra_sessions=(
+            McpServerSpec(name="docs2", url="https://a.example"),
+            McpServerSpec(name="docs3", url="https://b.example"),
+        ),
+    )
+    assert [s.name for s in sessions] == ["mcp", "docs2", "docs3"]
+
+
+def test_collision_is_logged():
+    lines: list[str] = []
+    _compose(
+        extra_sessions=(McpServerSpec(name="mcp", url="https://x.example"),),
+        log=lines.append,
+    )
+    assert any("duplicates an already-configured session name" in ln for ln in lines)
+
+
+# ── URL scheme is validated at parse time, not at construction ───────
+
+
+def test_non_http_url_rejected_at_parse_time():
+    import pytest
+
+    with pytest.raises(ValueError, match="must be http:// or https://"):
+        parse_mcp_servers_env('[{"name": "x", "url": "not-a-url"}]')
+
+
+def test_token_env_that_looks_like_a_token_is_not_echoed(capsys):
+    parse_mcp_servers_env(
+        '[{"name": "x", "url": "https://x.example", '
+        '"token_env": "ghp_sensitiveLookingValue"}]',
+        environ={},
+    )
+    err = capsys.readouterr().out
+    assert "ghp_sensitiveLookingValue" not in err
+    assert "did you paste a token" in err
+
+
+def test_valid_token_env_name_is_still_echoed(capsys):
+    parse_mcp_servers_env(
+        '[{"name": "x", "url": "https://x.example", "token_env": "DOCS2_TOKEN"}]',
+        environ={},
+    )
+    assert "DOCS2_TOKEN" in capsys.readouterr().out
