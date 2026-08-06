@@ -143,6 +143,23 @@ def _make_pydantic_ai_local_tools(
     provider: GitProvider = git_provider if git_provider is not None else LocalGitProvider()
     _ = tool_arg_defaults  # reserved; see docstring
 
+    # Duplicate-call guard, scoped to this review (the factory is called
+    # once per run). A model stuck re-issuing the byte-identical call —
+    # observed as the same (tool, args) pair on alternating turns — gets
+    # a short stub instead of the full result re-injected, so a repeat
+    # loop costs tokens once, not every turn.
+    seen_calls: set[tuple] = set()
+
+    def _dedup(key: tuple) -> str | None:
+        if key in seen_calls:
+            return (
+                f"duplicate call: {key[0]} already ran with these exact "
+                "arguments in this review — its result is earlier in the "
+                "conversation. Use that result, or change the arguments."
+            )
+        seen_calls.add(key)
+        return None
+
     async def grep_repo(
         pattern: str,
         glob: str | None = None,
@@ -163,6 +180,9 @@ def _make_pydantic_ai_local_tools(
             max_count: Max matches (default 50, cap 500).
             context_lines: Lines of context each side (0-5, default 0).
         """
+        stub = _dedup(("grep_repo", pattern, glob, max_count, context_lines))
+        if stub is not None:
+            return stub
         return provider.grep_repo(
             {
                 "pattern": pattern,
@@ -186,6 +206,9 @@ def _make_pydantic_ai_local_tools(
             ref: Git ref (default HEAD = the PR state).
             path: Repo-relative file path. Omit for commit metadata.
         """
+        stub = _dedup(("git_show", ref, path))
+        if stub is not None:
+            return stub
         return provider.git_show({"ref": ref, "path": path})
 
     return [

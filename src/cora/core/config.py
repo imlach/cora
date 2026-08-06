@@ -204,7 +204,7 @@ VERDICT_WORDS: tuple[str, str, str] = ("looks good", "minor", "needs changes")
 # Per-call fit (the thing that protects a small-context T0 backend
 # from 4xx-ing on
 # context overflow) is enforced by `DIFF_CHAR_CAP`, `CLAUDE_MD_CHAR_CAP`,
-# and `result_char_cap` (LoopConfig override) — see the math block
+# and `TOOL_RESULT_CHAR_CAP` — see the math block
 # above those constants. These caps below are CUMULATIVE-spend
 # guards, not per-call enforcement: they catch true runaway loops
 # without braking normal-but-deep reviews.
@@ -423,9 +423,10 @@ DEFAULT_TRANSCRIPT_SOURCE = "trajectory-live"
 #   - framing/headers:                                 ~0.5K tokens
 #   - Total initial:                                  ~15.75K tokens
 #
-# Combined with result_char_cap=8K override below + 12-iteration
-# ceiling, last-call worst case: ~15.75K + 12×2K = ~40K per-call
-# prompt with ~8K headroom for output in a 48K T0 window.
+# Combined with `TOOL_RESULT_CHAR_CAP` (16K chars ≈ 4K tokens/result)
+# + the iteration ceiling, last-call worst case stays a bounded
+# multiple of the turn count instead of "whatever the biggest file in
+# the repo is" — see that constant's comment.
 #
 # Bumped 24K → 32K to cover more of medium-sized PRs without forcing
 # grep_repo/git_show to fill in the missing diff (the 12-iteration
@@ -445,6 +446,16 @@ PR_BODY_CHAR_CAP = 3_000
 # log tail to quote (errors cluster at the end of a job log).
 CI_CONTEXT_CHAR_CAP = 9_000
 CI_LOG_TAIL_CHARS = 2_400
+# Per-result ceiling for the in-process repo tools (grep_repo match
+# accumulation; git_show file content, head+tail). Before this cap a
+# whole-file `git_show` on a large repo doc injected the entire file
+# into one turn — observed +45K tokens from a single 155 KB read,
+# saturating a 114K-token T0 window and tripping the reasoning spiral.
+# 16K chars ≈ 4K tokens keeps a 2-3-call turn inside the ~2K-per-result
+# budget the math block above assumes, within rounding.
+TOOL_RESULT_CHAR_CAP = int(
+    os.environ.get("AGENT_REVIEW_TOOL_RESULT_CHAR_CAP", "16000")
+)
 
 # Whitelist of MCP-server tools exposed to the agent for PR review.
 # Live-infrastructure tools (kubectl_*, loki_query, prometheus_query,

@@ -21,7 +21,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from cora.core.config import REPO_ROOT
+from cora.core.config import REPO_ROOT, TOOL_RESULT_CHAR_CAP
 
 
 _GREP_SKIP_DIRS = frozenset(
@@ -41,6 +41,28 @@ _GREP_HARD_MAX_COUNT = 500
 _GREP_CONTEXT_MAX = 5
 _GREP_LINE_MAX = 512
 _GREP_FILE_SIZE_MAX = 2 * 1024 * 1024  # 2 MiB — bounds worst-case scan cost
+
+
+def _cap_content(text: str, cap: int = 0) -> tuple[str, bool]:
+    """Head+tail truncation to `cap` chars (default `TOOL_RESULT_CHAR_CAP`).
+
+    A whole-file read must never inject an unbounded result into the
+    agent's context — one uncapped read of a large doc can saturate a
+    small T0 context window in a single turn. Head 2/3 + tail 1/3 keeps
+    both the opening (imports, headers) and the end (recent appends)
+    visible; the marker tells the model how much is missing and how to
+    narrow the request."""
+    cap = cap or TOOL_RESULT_CHAR_CAP
+    if len(text) <= cap:
+        return text, False
+    head = (cap * 2) // 3
+    tail = cap - head
+    marker = (
+        f"\n…[{len(text) - cap:,} of {len(text):,} chars omitted — "
+        "narrow the request (a specific section, grep_repo with a "
+        "pattern) instead of re-reading the whole file]…\n"
+    )
+    return text[:head] + marker + text[-tail:], True
 
 
 def _is_binary(path: Path) -> bool:
@@ -107,6 +129,10 @@ def local_grep_repo(args: dict, *, root: Path | None = None) -> str:
     files_scanned = 0
     files_matched: set[str] = set()
     truncated = False
+    budget_hit = False
+    # Char budget across the whole result — max_count alone doesn't
+    # bound size (500 matches × 512-char lines × context is ~1.5 MB).
+    chars_used = 0
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in _GREP_SKIP_DIRS]
         if truncated:
@@ -149,6 +175,17 @@ def local_grep_repo(args: dict, *, root: Path | None = None) -> str:
                 if context_lines:
                     entry["before"] = lines[max(0, i - context_lines):i]
                     entry["after"] = lines[i + 1:i + 1 + context_lines]
+                chars_used += len(entry["content"]) + len(rel_path) + 40
+                if context_lines:
+                    chars_used += sum(
+                        len(s) for s in entry["before"] + entry["after"]
+                    )
+                if matches and chars_used > TOOL_RESULT_CHAR_CAP:
+                    # Keep at least one match; report the budget stop
+                    # distinctly from the max_count stop below.
+                    truncated = True
+                    budget_hit = True
+                    break
                 matches.append(entry)
                 files_matched.add(rel_path)
                 if len(matches) >= max_count:
@@ -165,7 +202,13 @@ def local_grep_repo(args: dict, *, root: Path | None = None) -> str:
         "files_scanned": files_scanned,
         "files_matched": len(files_matched),
     }
-    if glob and files_scanned == 0:
+    if budget_hit:
+        out["note"] = (
+            f"result char budget ({TOOL_RESULT_CHAR_CAP}) reached at "
+            f"{len(matches)} matches — narrow with a tighter pattern, a "
+            "glob, or context_lines=0"
+        )
+    elif glob and files_scanned == 0:
         # Distinguish "no matches" from "glob selected no files" — the
         # former is evidence, the latter is a mis-aimed glob.
         out["note"] = (
@@ -197,9 +240,12 @@ def local_git_show(args: dict, *, root: Path | None = None) -> str:
                 f"ERROR: git_show: could not read {path!r} at ref {ref!r}: "
                 f"{proc.stderr.strip()}"
             )
-        return json.dumps(
-            {"ref": ref, "path": path, "content": proc.stdout}, indent=2
-        )
+        content, truncated = _cap_content(proc.stdout)
+        payload = {"ref": ref, "path": path, "content": content}
+        if truncated:
+            payload["truncated"] = True
+            payload["total_chars"] = len(proc.stdout)
+        return json.dumps(payload, indent=2)
 
     # Commit-mode — metadata only. The checkout is shallow, so refs
     # older than the PR head may not resolve; the error says so.
