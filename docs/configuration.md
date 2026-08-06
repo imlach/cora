@@ -103,9 +103,37 @@ Deep review can attach MCP servers and expose tool subsets.
 | `MCP_URL` | Read-tool MCP server URL. **Unset self-disarms**: deep mode runs on the in-process `grep_repo`/`git_show` alone. Set but unreachable still fails the review — dropping tools you configured is the worse failure |
 | `MCP_TOKEN` | Token for the read-tool MCP server |
 | `MCP_ACTIONS_URL` | Actions MCP server URL |
-| `MCP_ACTIONS_TOKEN` | Token for the actions MCP server |
+| `MCP_ACTIONS_TOKEN` | Token for the actions MCP server. Unset **skips** the actions session entirely (not even a connection attempt) rather than connecting tokenless |
 | `WEB_FETCH_GATE_URL` | Fetch-gate endpoint for controlled web context |
+| `MCP_SERVERS` | JSON array of extra MCP sessions beyond the three named slots above — see [Generic extra MCP sessions](#generic-extra-mcp-sessions-mcp_servers) below |
+| `AGENT_REVIEW_EXTRA_TOOLS` | CSV of tool names to admit through the MCP allow-set filter, for tools served by an `MCP_SERVERS` session. Extends (never replaces) the built-in allow-sets; local tool names still win any name collision |
 | `REVIEWER_BROADEN_TOOLS` | No-op (accepted for compatibility) — the validate-any-claim tool framing is the default now |
+
+### Generic extra MCP sessions (`MCP_SERVERS`)
+
+`MCP_URL` / `MCP_ACTIONS_URL` / `WEB_FETCH_GATE_URL` cover the three
+sessions the reference deployment uses. A deployment wiring a fourth MCP
+server — a second knowledge base, a different action surface — doesn't
+need a new named env var: `MCP_SERVERS` is a JSON array, each entry
+
+```json
+{"name": "docs2", "url": "https://mcp.example/docs", "token_env": "DOCS2_TOKEN", "required": false}
+```
+
+| Field | Purpose |
+| --- | --- |
+| `name` | Identifies the session in logs (`<name> probe failed …`, `<name> session opened`). Required |
+| `url` | The MCP server's URL. Required |
+| `token_env` | Name of an environment variable holding the bearer token — **never a literal token in the JSON**. `MCP_SERVERS` often ends up in a workflow file or a log; keeping it token-*name*-only means it's safe to paste around. A `token_env` that doesn't resolve to a non-empty value connects tokenless, with a `::warning::` — it does not fail config parsing. Omit `token_env` entirely for a server that genuinely needs no auth (no warning in that case) |
+| `required` | `true` mirrors `MCP_URL`'s contract: an unreachable session fails the whole review (`mcp-connect-failed`). Default `false` — a failed probe just drops that session and the review continues on whatever else loaded |
+
+Malformed `MCP_SERVERS` JSON, or an entry missing `name`/`url`, raises at
+config-parse time (fails the run loudly) rather than silently running
+with fewer tools than configured.
+
+Naming an entry `"web-fetch"` additionally makes it the release-notes
+pre-fetch's endpoint when `WEB_FETCH_GATE_URL` is unset — see
+`cora.core.mcp_sessions.resolve_web_fetch_url`.
 
 ## Reporting And Write Paths
 
