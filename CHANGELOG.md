@@ -82,6 +82,19 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   the hundreds of MB where a repo checkout does not; hitting either cap
   truncates with an explicit note. `corpus="repo"` (the default) is
   unchanged. See `docs/configuration.md` for the full knob table.
+- **Linked-issue context.** A PR's title/body is parsed for same-repo
+  issue references — closing keywords (`fixes #12`, `closes owner/repo#12`,
+  …) and bare `#N` mentions — and up to 2 of them are fetched server-side
+  (title/state/body/earliest comments, bounded and capped) and injected
+  into the initial prompt as a trust-wrapped `<untrusted-content>` block,
+  the same "fetch it server-side, don't leave it to the model" precedent
+  `prefetch.py`'s release-notes pull uses. A `read_issue(number)` tool
+  (`core/issue_context.py`, deep mode only, same-repo only) covers issues
+  the pre-fetch's 2-issue cap or reference parsing misses. Both paths
+  share the fetch/bound/wrap code. New env kill switch
+  `AGENT_REVIEW_ISSUE_PREFETCH` (default on); the tool is toggled via
+  `ReviewerConfig.local_issue_tools`. Skipped entirely for bot-authored
+  PRs, same as retrieval and CLAUDE.md.
 - **Per-result char cap on the in-process repo tools**
   (`TOOL_RESULT_CHAR_CAP`, env `AGENT_REVIEW_TOOL_RESULT_CHAR_CAP`,
   default 16 000 chars). `git_show` file content is head+tail truncated

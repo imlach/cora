@@ -98,6 +98,8 @@ class ReviewRun:
     prefetched_release_notes: str | None = None
     prefetch_status: str | None = None
     prefetch_url: str | None = None
+    linked_issue_context: str | None = None
+    linked_issue_numbers: list[int] = field(default_factory=list)
     initial_user_prompt: str = ""
 
     # ── tier dispatch ───────────────────────────────────────────────

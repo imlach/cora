@@ -120,14 +120,18 @@ def _make_pydantic_ai_local_tools(
     tool_arg_defaults: dict[str, dict[str, Any]] | None,
     *,
     git_provider: GitProvider | None = None,
+    repo: str | None = None,
+    cfg: "ReviewerConfig | None" = None,
 ):
     """Build typed Pydantic-AI tool wrappers around the repo-introspection
-    grep_repo + git_show handlers, served via a `GitProvider`.
+    grep_repo + git_show handlers (served via a `GitProvider`) plus, when
+    `repo` is given, `read_issue` (served via `core/issue_context.py`).
 
     Returns a list of `Tool` instances ready to pass into the agent
-    factory's `local_tools` config field. Names + signatures mirror
-    the MCP server's grep_repo / git_show so the model's learned tool use
-    carries over (only the corpus differs — PR branch vs main mirror).
+    factory's `local_tools` config field. grep_repo / git_show names +
+    signatures mirror the MCP server's copies so the model's learned
+    tool use carries over (only the corpus differs — PR branch vs main
+    mirror).
 
     `git_provider` defaults to `LocalGitProvider` (the in-CI checkout); a
     caller — eventually `run_review` from config — can inject another
@@ -136,9 +140,15 @@ def _make_pydantic_ai_local_tools(
     model needing to set it. Today `web_fetch_doc` is the only consumer of
     that pattern and it lives on the MCP side — so the hook is currently a
     no-op, reserved for when a local tool needs the same treatment.
+
+    `read_issue` is registered only when `repo` is set (deep mode always
+    has one) AND `"read_issue"` is in `cfg.local_issue_tools` (default:
+    `core.config.LOCAL_ISSUE_TOOLS`, i.e. on) — an adopter can drop it
+    from that set to disable the tool without touching this factory.
     """
     from pydantic_ai import Tool
 
+    from cora.core import config as _c
     from cora.providers.git import LocalGitProvider
 
     provider: GitProvider = git_provider if git_provider is not None else LocalGitProvider()
@@ -224,10 +234,41 @@ def _make_pydantic_ai_local_tools(
             return stub
         return provider.git_show({"ref": ref, "path": path})
 
-    return [
+    tools = [
         Tool(grep_repo, name="grep_repo"),
         Tool(git_show, name="git_show"),
     ]
+
+    issue_tools = cfg.local_issue_tools if cfg is not None else _c.LOCAL_ISSUE_TOOLS
+    if repo and "read_issue" in issue_tools:
+        from cora.core.issue_context import local_read_issue
+
+        async def read_issue(number: int, repo_hint: str | None = None) -> str:
+            """Fetch a GitHub issue from THIS repository — title, state,
+            body, and its earliest comments (bounded, same trust-wrapped
+            shape as the pre-fetched linked-issue block, if you saw one
+            above). Use it when the PR references an issue the
+            pre-fetch's 2-issue cap or reference parsing didn't catch —
+            a third linked issue, or one mentioned without a closing
+            keyword.
+
+            Args:
+                number: Issue number, e.g. 42 for `#42`.
+                repo_hint: Optional `owner/repo` sanity check. Only this
+                    review's own repo is supported — anything else is
+                    rejected, never fetched. Omit it; it defaults to
+                    this repo.
+            """
+            stub = _dedup(("read_issue", number, repo_hint))
+            if stub is not None:
+                return stub
+            return local_read_issue(
+                {"number": number, "repo": repo_hint}, repo=repo, cfg=cfg
+            )
+
+        tools.append(Tool(read_issue, name="read_issue"))
+
+    return tools
 
 
 def _loaded_tool_names(
@@ -248,6 +289,7 @@ def _loaded_tool_names(
     extra_enabled: bool = False,
     read_tools: set[str] | frozenset[str] | None = None,
     local_repo_tools: set[str] | frozenset[str] | None = None,
+    local_issue_tools: set[str] | frozenset[str] | None = None,
     action_tools: set[str] | frozenset[str] | None = None,
     web_tools: set[str] | frozenset[str] | None = None,
     extra_tools: set[str] | frozenset[str] | None = None,
@@ -256,9 +298,9 @@ def _loaded_tool_names(
 
     `allowed_tools` is the broad policy allowlist, not the loaded
     palette: optional MCP servers may be absent, while local repo tools
-    are always registered in-process. Keep the comment footer's
-    "unused" denominator tied to the successfully opened server
-    classes so it remains useful as a tool-loading signal.
+    (and `read_issue`) are always registered in-process. Keep the
+    comment footer's "unused" denominator tied to the successfully
+    opened server classes so it remains useful as a tool-loading signal.
     """
     from cora.core import config as _c
 
@@ -266,11 +308,14 @@ def _loaded_tool_names(
     local_set = set(
         _c.LOCAL_REPO_TOOLS if local_repo_tools is None else local_repo_tools
     )
+    issue_set = set(
+        _c.LOCAL_ISSUE_TOOLS if local_issue_tools is None else local_issue_tools
+    )
     action_set = set(_c.ACTION_TOOLS if action_tools is None else action_tools)
     web_set = set(_c.WEB_TOOLS if web_tools is None else web_tools)
     extra_set = set(extra_tools or ())
 
-    loaded = set(allowed_tools) & local_set
+    loaded = set(allowed_tools) & (local_set | issue_set)
     if read_enabled:
         loaded |= set(allowed_tools) & read_set
     if actions_enabled:
@@ -464,7 +509,7 @@ async def deep_review_call(
         mcp_servers=mcp_servers,
         mcp_allowed_tools=mcp_allowed_for_filter,
         local_tools=_make_pydantic_ai_local_tools(
-            tool_arg_defaults, git_provider=git_provider
+            tool_arg_defaults, git_provider=git_provider, repo=repo, cfg=cfg
         ),
         # Tool-call retries on transient MCP failures.
         retries=1,
@@ -512,6 +557,7 @@ async def deep_review_call(
         extra_enabled=extra_enabled,
         read_tools=cfg.read_tools if cfg is not None else None,
         local_repo_tools=cfg.local_repo_tools if cfg is not None else None,
+        local_issue_tools=cfg.local_issue_tools if cfg is not None else None,
         action_tools=cfg.action_tools if cfg is not None else None,
         web_tools=cfg.web_tools if cfg is not None else None,
         extra_tools=cfg.extra_tools if cfg is not None else None,

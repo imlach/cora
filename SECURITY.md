@@ -39,6 +39,29 @@ attempts are to be flagged as Blockers, not obeyed. Treat the prompt
 framing as harm *reduction* — the trigger policy below is the actual
 gate.
 
+**Untrusted content that is not the diff.** Some context reaches the
+model from outside the PR: a linked issue thread, fetched release
+notes, MCP tool output. On a public repo that text is world-writable —
+filing an issue takes no privilege at all — so it is wrapped in an
+`<untrusted-content>` block, and two properties must hold together:
+
+- **The boundary cannot be forged.** Wrapping alone is not containment.
+  Text carrying a literal `</untrusted-content>` would otherwise end
+  the block early, and everything after it would read as ordinary
+  prompt text. Fetched text is neutralized so it holds no usable
+  boundary tag, *and* the block carries a per-review random `id` on
+  both tags, so a payload that survived neutralization still cannot
+  guess its terminator.
+- **The model is told what the tag means.** A wrapper the prompt never
+  explains is decoration. `deep.md` and `quick.md` both state that
+  `<untrusted-content>` marks third-party data, and that text inside it
+  claiming to be a system note, a prior approval, or a closing tag is
+  untrusted content lying about its own status.
+
+Anything that injects fetched text into the prompt must do both. Adding
+the wrapper without the prompt rule, or the prompt rule without
+escaping, leaves the boundary asserted rather than enforced.
+
 ## TriggerPolicy — who may fire a review, at what capability
 
 `ReviewerConfig.trigger` carries a `TriggerPolicy`

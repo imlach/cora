@@ -4,8 +4,9 @@ Launches the three independent pre-flight fetches (diff, CI context,
 classifier rationale) concurrently plus the fire-and-forget cold-start
 pretrigger, then folds the results — capped diff, capped PR body,
 CLAUDE.md, retrieval pre-pack (skipped for bot authors and
-classifier-trivial PRs), failing-CI detail, dep-bump release notes —
-into the initial user prompt via `assemble_initial_user_prompt`.
+classifier-trivial PRs), failing-CI detail, dep-bump release notes,
+linked-issue context (`core/issue_context.py`) — into the initial user
+prompt via `assemble_initial_user_prompt`.
 
 A failed diff fetch is the one hard skip here (`cancelled`, transient —
 re-push to retry); retrieval and every enrichment soft-fail to a leaner
@@ -244,6 +245,61 @@ async def assemble_context(run: ReviewRun) -> ReviewResult | None:
                 "release-notes prefetch skipped: no GitHub release URL in PR body"
             )
 
+    # Linked-issue pre-fetch: the PR title/body may reference issue(s)
+    # in this repo via a closing keyword ("fixes #12") or a bare
+    # mention ("see #34"). Fetch title/state/body/earliest-comments for
+    # up to `cfg.issue_prefetch_max_issues` distinct same-repo issues
+    # server-side (same precedent as the release-notes pre-fetch above)
+    # and inject as one bounded, trust-wrapped block. Bot PRs skip this
+    # — same reasoning as CLAUDE.md/retrieval above: a Renovate/
+    # Dependabot body doesn't carry human-authored issue links.
+    if run.bot_author:
+        _gha_log("linked-issue prefetch skipped: bot-authored PR")
+    elif not cfg.issue_context_prefetch:
+        _gha_log("linked-issue prefetch skipped: AGENT_REVIEW_ISSUE_PREFETCH=false")
+    else:
+        from cora.core.issue_context import (
+            fetch_issue,
+            format_issue_context_block,
+            parse_linked_issues,
+            wrap_issue_context_block,
+        )
+
+        linked_numbers = parse_linked_issues(
+            metadata.get("title") or "", metadata.get("body") or "",
+            repo=run.repo, cfg=cfg,
+        )
+        if not linked_numbers:
+            _gha_log("linked-issue prefetch: no same-repo issue references in title/body")
+        else:
+            try:
+                fetched = await asyncio.gather(
+                    *(
+                        asyncio.to_thread(fetch_issue, run.repo, n, cfg=cfg)
+                        for n in linked_numbers
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"::warning::linked-issue prefetch errored: {exc}")
+                fetched = []
+            issues = [i for i in fetched if i]
+            run.linked_issue_numbers = [i["number"] for i in issues]
+            if not issues:
+                _gha_log(
+                    f"linked-issue prefetch: refs={linked_numbers} — all "
+                    "fetches failed (gh error, not found, or no access)"
+                )
+            else:
+                block = format_issue_context_block(issues, cfg=cfg)
+                run.linked_issue_context = wrap_issue_context_block(
+                    block, repo=run.repo, numbers=run.linked_issue_numbers
+                )
+                _gha_log(
+                    f"linked-issue prefetch: refs={linked_numbers} "
+                    f"fetched={run.linked_issue_numbers} "
+                    f"chars={len(run.linked_issue_context)}"
+                )
+
     run.initial_user_prompt = assemble_initial_user_prompt(
         metadata,
         run.diff_text,
@@ -254,6 +310,7 @@ async def assemble_context(run: ReviewRun) -> ReviewResult | None:
         bot_author=run.bot_author,
         retrieved_docs=run.retrieved_docs,
         prefetched_release_notes=run.prefetched_release_notes,
+        linked_issue_context=run.linked_issue_context,
         tools_available=not run.is_quick,
         ci_context=ci_context,
         classifier_rationale=classifier_rationale,
