@@ -55,6 +55,71 @@ def test_local_tools_callable_returns_handler_output(tmp_path, monkeypatch):
     assert "needle.txt" in result
 
 
+def test_grep_repo_tool_defaults_corpus_to_repo():
+    """The `corpus` param is new; a caller that omits it (every existing
+    tool-schema caller, and the model before it learns the new param)
+    must keep getting `corpus="repo"` results, unchanged."""
+    from cora.core.deep_review import _make_pydantic_ai_local_tools
+    from cora.providers.git import GitProvider
+
+    captured: list[dict] = []
+
+    class _SpyGit(GitProvider):
+        def grep_repo(self, args: dict) -> str:
+            captured.append(args)
+            return "OUT"
+
+        def git_show(self, args: dict) -> str:
+            return "OUT"
+
+    tools = _make_pydantic_ai_local_tools(None, git_provider=_SpyGit())
+    grep_tool = next(t for t in tools if t.name == "grep_repo")
+    asyncio.run(grep_tool.function(pattern="x"))
+    assert captured[0]["corpus"] == "repo"
+
+
+def test_grep_repo_tool_threads_corpus_param_through():
+    from cora.core.deep_review import _make_pydantic_ai_local_tools
+    from cora.providers.git import GitProvider
+
+    captured: list[dict] = []
+
+    class _SpyGit(GitProvider):
+        def grep_repo(self, args: dict) -> str:
+            captured.append(args)
+            return "OUT"
+
+        def git_show(self, args: dict) -> str:
+            return "OUT"
+
+    tools = _make_pydantic_ai_local_tools(None, git_provider=_SpyGit())
+    grep_tool = next(t for t in tools if t.name == "grep_repo")
+    asyncio.run(grep_tool.function(pattern="x", corpus="deps"))
+    assert captured[0]["corpus"] == "deps"
+
+
+def test_grep_repo_dedup_treats_different_corpus_as_a_distinct_call():
+    """The duplicate-call guard keys on the full call signature —
+    `corpus="repo"` and `corpus="deps"` with the same pattern are two
+    different questions, not a repeat."""
+    from cora.core.deep_review import _make_pydantic_ai_local_tools
+    from cora.providers.git import GitProvider
+
+    class _SpyGit(GitProvider):
+        def grep_repo(self, args: dict) -> str:
+            return f"OUT:{args['corpus']}"
+
+        def git_show(self, args: dict) -> str:
+            return "OUT"
+
+    tools = _make_pydantic_ai_local_tools(None, git_provider=_SpyGit())
+    grep_tool = next(t for t in tools if t.name == "grep_repo")
+    first = asyncio.run(grep_tool.function(pattern="x", corpus="repo"))
+    second = asyncio.run(grep_tool.function(pattern="x", corpus="deps"))
+    assert first == "OUT:repo"
+    assert second == "OUT:deps"  # not a "duplicate call" stub
+
+
 def test_probe_mcp_server_returns_false_on_unreachable():
     """Probe should soft-fail to False on a connection error — the
     legacy `open_optional_mcp_session` did the same. Used to gate

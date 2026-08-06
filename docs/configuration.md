@@ -149,6 +149,24 @@ with fewer tools than configured.
 Naming an entry `"web-fetch"` additionally makes it the release-notes
 pre-fetch's endpoint when `WEB_FETCH_GATE_URL` is unset — see
 `cora.core.mcp_sessions.resolve_web_fetch_url`.
+## Dependency-Source Corpus
+
+`grep_repo`'s second corpus (`corpus="deps"`) lets deep mode check a
+third-party library's actual API at the pinned version instead of asserting
+it from training-data memory. It searches dependency source your CI runner
+has already materialized — cora never resolves or fetches dependencies
+itself.
+
+| Variable | Default behavior |
+| --- | --- |
+| `DEP_SOURCE_ROOTS` | CSV of absolute paths to dependency-source trees (a Go module cache, a vendor dir, `node_modules`, a `site-packages` dir, ...). **Unset self-disarms**, same convention as `MCP_URL` — unless in-repo `vendor/` or `node_modules/` is found directly under the checkout root, which is auto-detected as a fallback. A configured path that doesn't exist at startup is dropped with a `::warning::`, not a failure |
+| `DEP_SOURCE_MAX_FILES_SCANNED` | Total files the `deps` corpus walk will touch before truncating (default 50000). Independent of `grep_repo`'s existing match-count cap — this bounds directory-walk cost on a large dependency tree, not result size |
+
+Results are labelled by which root matched (`<root-dir-name>/<path>`) and
+carry `"corpus": "deps"` so provenance is never ambiguous with a `"repo"`
+corpus result. Requesting `corpus="deps"` with no roots configured returns
+a plain one-line message, not an error — the model learns the corpus is
+absent instead of retrying.
 
 ## Reporting And Write Paths
 

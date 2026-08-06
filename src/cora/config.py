@@ -243,6 +243,17 @@ class ReviewerConfig:
     web_tools: frozenset[str] = field(default_factory=lambda: frozenset(_c.WEB_TOOLS))
     local_repo_tools: frozenset[str] = field(default_factory=lambda: frozenset(_c.LOCAL_REPO_TOOLS))
 
+    # ── Dependency-source corpus (optional; deep mode's
+    #    grep_repo(corpus="deps")) ────────────────────────────────────
+    # CSV of absolute paths to resolved dependency-source trees
+    # (`DEP_SOURCE_ROOTS`), parsed in `from_env`. Empty (the default)
+    # self-disarms unless in-repo `vendor/`/`node_modules/` are
+    # auto-detected under the checkout root — existence + auto-detection
+    # both happen at startup in the `GitProvider` seam (it needs the
+    # checkout root), see `providers.git._resolve_dep_source_roots`.
+    dep_source_roots: tuple[str, ...] = _c.DEFAULT_DEP_SOURCE_ROOTS
+    dep_source_max_files_scanned: int = _c.DEP_SOURCE_MAX_FILES_SCANNED
+
     # ── Cold-start pretrigger (disarmed when empty) ──────────────────
     # The `model` aliases the warmup fires at (see `cora.core.pretrigger`).
     # Empty default = no warmup; a deployment with scale-from-zero
@@ -439,6 +450,9 @@ class ReviewerConfig:
                 _c.SPIRAL_RECOVERY_REASONING_CHAR_CAP,
             ),
             retrieval_cache_ttl_s=getint("AGENT_REVIEW_CACHE_TTL_S", _c.RETRIEVAL_CACHE_TTL_S),
+            dep_source_max_files_scanned=getint(
+                "DEP_SOURCE_MAX_FILES_SCANNED", _c.DEP_SOURCE_MAX_FILES_SCANNED
+            ),
             # Tier escalation. The default-false gates use the
             # `.strip().lower() == "true"` parse (anything
             # but "true" stays off); the alias chains treat empty as
@@ -511,6 +525,16 @@ class ReviewerConfig:
         if (globs := get("AGENT_REVIEW_RETRIEVAL_GLOB")):
             cfg.retrieval_glob_include = tuple(
                 s.strip() for s in globs.split(",") if s.strip()
+            )
+        # Dependency-source corpus roots: CSV of absolute paths a
+        # deployment's CI runner has already materialized (Go module
+        # cache, vendor dir, node_modules, site-packages, ...).
+        # Existence + in-repo auto-detection are resolved later, by the
+        # `GitProvider` seam (it needs the checkout root) — `from_env`
+        # only parses the list.
+        if (dep_roots := get("DEP_SOURCE_ROOTS")):
+            cfg.dep_source_roots = tuple(
+                s.strip() for s in dep_roots.split(",") if s.strip()
             )
 
         # Escalation trigger set — CSV of `ESCALATE_TRIGGERS` members.

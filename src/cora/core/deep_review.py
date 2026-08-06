@@ -166,22 +166,33 @@ def _make_pydantic_ai_local_tools(
         glob: str | None = None,
         max_count: int = 50,
         context_lines: int = 0,
+        corpus: str = "repo",
     ) -> str:
-        """Regex-search the repository AT THIS PR's STATE (the PR
-        branch merged onto its base). Results reflect files this PR
-        adds, modifies, or deletes — use it to confirm whether a
-        symbol, file, or pattern exists in the code under review.
-        Returns matches with path + line + content.
+        """Regex-search a corpus AT THIS PR's STATE. Two corpora:
+        `corpus="repo"` (default) is the PR checkout — the PR branch
+        merged onto its base — so results reflect files this PR adds,
+        modifies, or deletes. `corpus="deps"` is the deployment's
+        resolved dependency source (a Go module cache, vendor dir,
+        node_modules, site-packages, ...), when configured — use it to
+        check a third-party library's actual API at the pinned version
+        instead of asserting it from memory. If no dependency corpus is
+        configured, `corpus="deps"` returns a one-line message saying so
+        (not an error) — don't retry it.
 
         Args:
             pattern: Python regular expression.
-            glob: Optional repo-relative fnmatch glob to restrict
-                which paths are searched. A directory path (with or
-                without trailing "/") searches its whole subtree.
+            glob: Optional fnmatch glob to restrict which paths are
+                searched (repo-relative, or root-relative for
+                `corpus="deps"`). A directory path (with or without
+                trailing "/") searches its whole subtree.
             max_count: Max matches (default 50, cap 500).
             context_lines: Lines of context each side (0-5, default 0).
+            corpus: "repo" (default, the PR checkout) or "deps" (the
+                deployment's dependency-source corpus, if configured).
         """
-        stub = _dedup(("grep_repo", pattern, glob, max_count, context_lines))
+        stub = _dedup(
+            ("grep_repo", pattern, glob, max_count, context_lines, corpus)
+        )
         if stub is not None:
             return stub
         return provider.grep_repo(
@@ -190,6 +201,7 @@ def _make_pydantic_ai_local_tools(
                 "glob": glob,
                 "max_count": max_count,
                 "context_lines": context_lines,
+                "corpus": corpus,
             }
         )
 
