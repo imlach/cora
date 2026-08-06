@@ -90,11 +90,45 @@ def _verdict_marker(run_id: str) -> str:
     return f"{VERDICT_MARKER_PREFIX}{run_id}{MARKER_SUFFIX}"
 
 
+def _with_run_marker(body: str, marker: str) -> str:
+    """Insert the run-scoped marker as the SECOND line, directly after
+    the rendered body's leading `COMMENT_MARKER`.
+
+    The order is load-bearing, not cosmetic. `COMMENT_MARKER` is the
+    documented "this is a cora comment" signal and adopters match it
+    with `startswith` — a deployment's automerge watchdog does exactly
+    that against the raw comment body. Putting the run marker in front
+    would silently break every such matcher while looking correct from
+    inside the engine, so the generic marker keeps position 0 and the
+    run scope rides directly behind it.
+
+    Every posted body ends up satisfying the same invariant —
+    `COMMENT_MARKER` first, run marker second — including one that
+    arrived without the generic marker (nothing in-tree does that, but
+    the discovery predicate would silently fail to find such a comment
+    again, so the marker is added rather than assumed)."""
+    head, sep, rest = body.partition("\n")
+    if head == COMMENT_MARKER and sep:
+        return f"{head}\n{marker}\n{rest}"
+    return f"{COMMENT_MARKER}\n{marker}\n{body}"
+
+
+def _own_comment_jq(run_id: str) -> str:
+    """jq predicate for "a cora comment written by THIS run": the
+    generic marker at position 0 AND this run's marker somewhere in the
+    body. Both halves are needed — `startswith` alone can't tell runs
+    apart, and a bare `contains` would match a human comment quoting a
+    marker in a code fence (cora#29's own issue body does that)."""
+    return (
+        f'((.body | startswith("{COMMENT_MARKER}")) and ('
+        f'(.body | contains("{_progress_marker(run_id)}")) or '
+        f'(.body | contains("{_verdict_marker(run_id)}"))))'
+    )
+
+
 def _startswith_any_jq(markers: tuple[str, ...]) -> str:
     """jq boolean expression: true if `.body` starts with any of
-    `markers`. Works for bare prefixes too (`PROGRESS_MARKER_PREFIX`
-    without its `<run_id>` suffix) — jq's `startswith` just compares
-    the literal characters given, so a prefix alone matches any run id.
+    `markers` — the "is this a cora comment at all" discovery test.
     `GITHUB_RUN_ID` is GitHub-minted (numeric), so no escaping is
     needed for the f-string interpolation here."""
     return " or ".join(f'(.body | startswith("{m}"))' for m in markers)
@@ -120,7 +154,10 @@ def create_progress_comment(repo: str, pr_number: str, body: str) -> None:
     collapses it once this run finishes.
     """
     proc = _gh_with_one_retry(
-        ["gh", "pr", "comment", pr_number, "--body", f"{_progress_marker(_run_id())}\n{body}"],
+        [
+            "gh", "pr", "comment", pr_number,
+            "--body", _with_run_marker(body, _progress_marker(_run_id())),
+        ],
         env=_cora_env(),
     )
     if proc.returncode != 0:
@@ -141,10 +178,10 @@ def update_run_comment(repo: str, pr_number: str, body: str, *, final: bool) -> 
     """
     run_id = _run_id()
     marker = _verdict_marker(run_id) if final else _progress_marker(run_id)
-    full_body = f"{marker}\n{body}"
+    full_body = _with_run_marker(body, marker)
     env = _cora_env()
 
-    own_predicate = _startswith_any_jq((_progress_marker(run_id), _verdict_marker(run_id)))
+    own_predicate = _own_comment_jq(run_id)
     list_proc = _gh_with_one_retry(
         [
             "gh", "api",
@@ -241,10 +278,14 @@ def minimize_superseded_comments(repo: str, pr_number: str) -> None:
     try:
         run_id = _run_id()
         env = _cora_env()
+        # Every comment this engine writes opens with COMMENT_MARKER
+        # (the run marker sits on the line below it), so discovery is
+        # the generic marker plus the retired ones — a pre-migration
+        # comment gets collapsed rather than adopted, per cora#29.
         cora_predicate = _startswith_any_jq(
-            (COMMENT_MARKER, *LEGACY_COMMENT_MARKERS, PROGRESS_MARKER_PREFIX, VERDICT_MARKER_PREFIX)
+            (COMMENT_MARKER, *LEGACY_COMMENT_MARKERS)
         )
-        own_predicate = _startswith_any_jq((_progress_marker(run_id), _verdict_marker(run_id)))
+        own_predicate = _own_comment_jq(run_id)
         list_proc = _gh_with_one_retry(
             [
                 "gh", "api",

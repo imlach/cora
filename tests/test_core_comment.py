@@ -33,14 +33,19 @@ def _is_cora_body(body: str) -> bool:
     """Python-side mirror of the jq predicate `minimize_superseded_comments`
     builds — used by the fake store to decide which comments a listing
     call should return, independent of the jq text itself."""
-    return body.startswith(
-        (COMMENT_MARKER, *LEGACY_COMMENT_MARKERS, PROGRESS_MARKER_PREFIX, VERDICT_MARKER_PREFIX)
-    )
+    return body.startswith((COMMENT_MARKER, *LEGACY_COMMENT_MARKERS))
 
 
 def _is_own_body(body: str) -> bool:
+    """Mirror of `_own_comment_jq`: generic marker at position 0 AND
+    this run's marker in the body."""
     run_id = comment_mod._run_id()
-    return body.startswith((comment_mod._progress_marker(run_id), comment_mod._verdict_marker(run_id)))
+    if not body.startswith(COMMENT_MARKER):
+        return False
+    return (
+        comment_mod._progress_marker(run_id) in body
+        or comment_mod._verdict_marker(run_id) in body
+    )
 
 
 class _FakeGhStore:
@@ -143,12 +148,12 @@ def test_two_runs_second_live_first_minimized(monkeypatch):
     monkeypatch.setattr(comment_mod, "_gh_with_one_retry", store.handle)
 
     monkeypatch.setenv("GITHUB_RUN_ID", "111")
-    comment_mod.create_progress_comment("o/r", "7", "reviewing...")
-    comment_mod.update_run_comment("o/r", "7", "verdict A", final=True)
+    comment_mod.create_progress_comment("o/r", "7", f"{COMMENT_MARKER}\nreviewing...")
+    comment_mod.update_run_comment("o/r", "7", f"{COMMENT_MARKER}\nverdict A", final=True)
     comment_mod.minimize_superseded_comments("o/r", "7")  # nothing to collapse yet
 
     monkeypatch.setenv("GITHUB_RUN_ID", "222")
-    comment_mod.update_run_comment("o/r", "7", "verdict B", final=True)
+    comment_mod.update_run_comment("o/r", "7", f"{COMMENT_MARKER}\nverdict B", final=True)
     comment_mod.minimize_superseded_comments("o/r", "7")
 
     assert len(store.comments) == 2
@@ -156,7 +161,7 @@ def test_two_runs_second_live_first_minimized(monkeypatch):
     run_b = next(c for c in store.comments.values() if "verdict B" in c["body"])
     assert run_a["node_id"] in store.minimized
     assert run_b["node_id"] not in store.minimized
-    assert run_b["body"].startswith(comment_mod._verdict_marker("222"))
+    assert run_b["body"].splitlines()[:2] == [COMMENT_MARKER, comment_mod._verdict_marker("222")]
 
 
 # ── minimize soft-fails ────────────────────────────────────────────────
@@ -167,7 +172,7 @@ def test_minimize_failure_does_not_raise(monkeypatch, capsys):
     monkeypatch.setattr(comment_mod, "_gh_with_one_retry", store.handle)
 
     monkeypatch.setenv("GITHUB_RUN_ID", "1")
-    comment_mod.update_run_comment("o/r", "7", "verdict 1 (rc failure)", final=True)
+    comment_mod.update_run_comment("o/r", "7", f"{COMMENT_MARKER}\nverdict 1 (rc failure)", final=True)
     monkeypatch.setenv("GITHUB_RUN_ID", "2")
     comment_mod.update_run_comment("o/r", "7", "verdict 2 (errors payload)", final=True)
     monkeypatch.setenv("GITHUB_RUN_ID", "3")
@@ -256,7 +261,7 @@ def test_progress_to_verdict_swap_edits_not_duplicates(monkeypatch):
     monkeypatch.setattr(comment_mod, "_gh_with_one_retry", store.handle)
     monkeypatch.setenv("GITHUB_RUN_ID", "5")
 
-    comment_mod.create_progress_comment("o/r", "7", "reviewing...")
+    comment_mod.create_progress_comment("o/r", "7", f"{COMMENT_MARKER}\nreviewing...")
     assert len(store.comments) == 1
 
     comment_mod.update_run_comment("o/r", "7", "mid-run update", final=False)
@@ -266,7 +271,7 @@ def test_progress_to_verdict_swap_edits_not_duplicates(monkeypatch):
     assert len(store.comments) == 1  # still one comment for this run
 
     only = next(iter(store.comments.values()))
-    assert only["body"].startswith(comment_mod._verdict_marker("5"))
+    assert only["body"].splitlines()[:2] == [COMMENT_MARKER, comment_mod._verdict_marker("5")]
     assert "the verdict" in only["body"]
 
 
@@ -283,7 +288,7 @@ def test_update_run_comment_creates_when_no_placeholder_exists(monkeypatch):
 
     assert len(store.comments) == 1
     only = next(iter(store.comments.values()))
-    assert only["body"].startswith(comment_mod._verdict_marker("77"))
+    assert only["body"].splitlines()[:2] == [COMMENT_MARKER, comment_mod._verdict_marker("77")]
 
 
 # ── posting-call failure contract: still raises (only minimize soft-fails) ──
@@ -317,3 +322,23 @@ def test_cora_env_falls_back_without_app_token(monkeypatch):
     monkeypatch.delenv("CORA_GH_TOKEN", raising=False)
     monkeypatch.delenv("GH_TOKEN", raising=False)
     assert "GH_TOKEN" not in comment_mod._cora_env()
+
+
+def test_generic_marker_stays_at_position_zero(monkeypatch):
+    # Adopters (e.g. a deployment's automerge watchdog) match cora
+    # comments with `startswith(COMMENT_MARKER)` against the raw body.
+    # The run-scoped marker must ride BEHIND it, never in front.
+    store = _FakeGhStore()
+    monkeypatch.setattr(comment_mod, "_gh_with_one_retry", store.handle)
+    monkeypatch.setenv("GITHUB_RUN_ID", "909")
+
+    rendered = comment_mod.make_skip_comment("nothing to do")
+    assert rendered.startswith(COMMENT_MARKER)
+
+    comment_mod.update_run_comment("o/r", "7", rendered, final=True)
+    posted = next(iter(store.comments.values()))["body"]
+
+    assert posted.startswith(COMMENT_MARKER)
+    assert posted.splitlines()[1] == comment_mod._verdict_marker("909")
+    assert _is_own_body(posted) is True
+    assert _is_cora_body(posted) is True

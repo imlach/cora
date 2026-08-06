@@ -17,7 +17,11 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   owns exactly one comment (`<!-- cora:progress:<run_id> -->` while
   in-flight, PATCHed in place, then swapped to `<!-- cora:verdict:<run_id> -->`
   for the final verdict), keyed on `GITHUB_RUN_ID` so a cancelled run's
-  leftover placeholder is never mistaken for a later run's. Once that
+  leftover placeholder is never mistaken for a later run's. The
+  run-scoped marker sits on the line *below* `COMMENT_MARKER`, which
+  keeps position 0 — deployments that match cora comments with
+  `startswith(COMMENT_MARKER)` (an automerge watchdog, a corpus miner)
+  keep working unchanged. Once that
   run's own comment is live, every *other* cora comment on the PR
   (older verdicts, orphaned placeholders, and pre-migration
   single-comment-loop bodies still carrying only a `LEGACY_COMMENT_MARKERS`
