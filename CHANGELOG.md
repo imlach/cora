@@ -57,11 +57,13 @@ versions (e.g. `0.0.0.dev60+g257737d`).
     claim pattern get a visible harness note appended, and — only when
     EVERY blocker in the review matches — the verdict downgrades one
     step (`needs changes` → `minor`) with an explanatory line. Findings
-    are always annotated, never deleted. Soft-fails on any API error
-    (posts the review unchanged); killswitch
-    `AGENT_REVIEW_CI_VERDICT_GATE` (default-true). Does not touch the
-    GitHub check-run conclusion or the automerge-pause decision, both
-    already settled earlier in the pipeline — see the module docstring.
+    are always annotated, never deleted. The gate runs before the
+    verdict check-run posts, so a fully-contradicted review reports a
+    non-blocking check conclusion instead of a red one; the
+    automerge pause deliberately still fires (the blocker markers stay
+    in the body) so a human reads the annotated findings before merge.
+    Soft-fails on any API error (posts the review unchanged);
+    killswitch `AGENT_REVIEW_CI_VERDICT_GATE` (default-true).
 - **Per-result char cap on the in-process repo tools**
   (`TOOL_RESULT_CHAR_CAP`, env `AGENT_REVIEW_TOOL_RESULT_CHAR_CAP`,
   default 16 000 chars). `git_show` file content is head+tail truncated

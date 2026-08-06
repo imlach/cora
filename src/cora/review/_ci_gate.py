@@ -11,9 +11,9 @@ with the build, finished first, and posted two 🚨 Blocker findings
 ("this won't compile") that CI contradicted a few minutes later. The
 `needs changes` verdict was driven entirely by those two findings.
 
-This module runs once, as the last phase before `finalize()` builds the
-`ReviewResult` and posts it. When the settled verdict is the
-block-severity word (`needs changes` by default), it does ONE bounded
+This module runs once, from `produce_output` — after the verdict is
+parsed, before the verdict check-run posts. When the settled verdict is
+the block-severity word (`needs changes` by default), it does ONE bounded
 `gh api` re-poll of check-runs for the REVIEWED HEAD SHA (`run.head_sha`
 — the SHA the diff in the initial prompt was actually built from; a
 green run for an OLDER SHA proves nothing about this review, which is
@@ -41,21 +41,20 @@ Design choices worth knowing:
   a `needs changes` verdict less severe, never more; failing open in
   that direction can't newly block a merge, so soft-failing to "do
   nothing" is the safe default in both directions.
-- **Does NOT touch the check-run conclusion or the automerge pause.**
-  Both were already decided earlier in the pipeline: `_output.py`'s
-  `_finalize_observability` posts the verdict check-run (GitHub's
-  `complete_check`) right after the verdict is parsed, and that call is
-  idempotent by design (`Reporter.complete_check` is a first-write-wins
-  gate the SIGTERM guard also relies on) — re-opening it here to reflect
-  a later downgrade would break that invariant. `_finalize.py`'s
-  automerge-pause condition (`detect_blocker`) also still fires: it
-  scans for the literal `🚨 **Blocker:**` marker text, which this gate
-  deliberately leaves in place (see "Annotate, never delete" above).
-  In practice a downgraded review still shows a red required-check and
-  a paused automerge label — this gate's effect is scoped to the
-  human-facing comment body and `ReviewResult.verdict`/`.conclusion`,
-  not the merge-gating machinery. Widening that scope is a reasonable
-  follow-up, not something this backstop does implicitly.
+- **Runs BEFORE the check-run posts, so a downgrade reaches GitHub.**
+  `Reporter.complete_check` is a first-write-wins gate (an invariant
+  the SIGTERM guard relies on), so this gate cannot re-open an already
+  posted conclusion — instead `produce_output` calls it between the
+  verdict parse and `_finalize_observability`, making the first (and
+  only) check-run write carry the post-gate verdict. A fully
+  contradicted review therefore posts a non-blocking required check,
+  not a red one. The automerge pause is deliberately NOT changed:
+  `_finalize.py`'s `detect_blocker` scans for the literal
+  `🚨 **Blocker:**` marker text, which this gate leaves in place (see
+  "Annotate, never delete" above), so a downgraded review still pauses
+  automerge for human judgment — friction is the point there, and
+  lifting it belongs to the human who reads the annotated findings,
+  not to this heuristic.
 """
 
 from __future__ import annotations

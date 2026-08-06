@@ -20,9 +20,9 @@ below is the whole control flow:
     _gate       TriggerPolicy gate + GHA rate-cap probe
     _context    concurrent prefetches, retrieval pre-pack, prompt assembly
     _tiers      quick call / deep loop, escalation ladder, second opinion
-    _output     leak pipeline, observability trail, verdict parse
+    _output     leak pipeline, observability trail, CI-verdict gate
+                (`_ci_gate`, issue #23 — pre-check-post), verdict parse
     _patches    propose_patch dispatch + T2 patch escalation
-    _ci_gate    finalize-time CI-verdict backstop (issue #23)
     _finalize   ReviewResult, eval dumps, comment post, automerge pause
 
 Side-effect discipline:
@@ -88,7 +88,6 @@ from cora.providers.git import GitProvider
 from cora.providers.reporter import Reporter
 from cora.providers.retrieval import RetrievalProvider
 from cora.result import ReviewResult
-from cora.review._ci_gate import apply_ci_verdict_gate
 from cora.review._context import assemble_context
 from cora.review._finalize import finalize
 
@@ -240,5 +239,4 @@ async def _pipeline(run: ReviewRun) -> ReviewResult:
     if (skip := await produce_output(run)) is not None:
         return skip
     await dispatch_patches(run)
-    await apply_ci_verdict_gate(run)
     return finalize(run)
