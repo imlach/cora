@@ -12,6 +12,7 @@ import re
 from functools import lru_cache
 
 from cora.core.config import VERDICT_GLYPHS, VERDICT_WORDS
+from cora.core.log import _gha_log
 
 
 # How much of the body to search for the structured-output Verdict marker.
@@ -269,6 +270,57 @@ def _verdict_blocker_re(glyph: str, word: str) -> re.Pattern[str]:
     )
 
 
+# Where one 🚨 Blocker bullet's "own text" ends, for retraction scanning:
+# the next top-level/nested list item, or a blank-line paragraph break, or
+# end of body. Deliberately generous about what still counts as the SAME
+# bullet (wrapped continuation lines with no leading `-`/`*`/`1.` are kept
+# in scope, so a retraction on a wrapped second line is still found) and
+# conservative about what starts a NEW one — so prose the model writes
+# after the findings list (e.g. a closing "I have no actual blockers."
+# paragraph) never leaks into a bullet's scope, and one bullet's
+# retraction never bleeds into a sibling bullet's.
+_BLOCKER_BULLET_BOUNDARY_RE = re.compile(r"\n[ \t]*(?:[-*]\s|\d+[.)]\s)|\n[ \t]*\n")
+
+
+def _blocker_bullet_spans(review_text: str) -> list[str]:
+    """Return the local text of every `🚨 **Blocker:**` occurrence in
+    `review_text` — from the marker to the next bullet/paragraph boundary
+    (or end of body). Each occurrence gets its own bounded span, so a
+    retraction phrase found in one bullet never discounts another."""
+    spans = []
+    for m in _BLOCKER_LINE_RE.finditer(review_text):
+        boundary = _BLOCKER_BULLET_BOUNDARY_RE.search(review_text, m.end())
+        end = boundary.start() if boundary else len(review_text)
+        spans.append(review_text[m.start():end])
+    return spans
+
+
+# Narrow, bullet-LOCAL retraction phrases — matched only within the span
+# `_blocker_bullet_spans` extracts for one 🚨 Blocker bullet, never against
+# the whole body (a reassuring sentence elsewhere, e.g. "I have no actual
+# blockers.", is deliberately NOT consulted — see `detect_blocker`'s
+# docstring and cora#29). Each phrase reads as the model unambiguously
+# withdrawing the finding it just wrote, not a hedge ("might be", "could
+# be an issue") or a plain description of correct behaviour. Same posture
+# as `_ci_gate._CI_CONTRADICTION_CLAIM_RE`: a false negative here just
+# means a retracted bullet still counts and still posts for a human to
+# read (today's behaviour, unchanged); a false positive would silently
+# drop a live blocker, which is the failure mode to avoid — bias the
+# pattern toward under-matching.
+_BLOCKER_RETRACTION_RE = re.compile(
+    r"""
+    false\ alarm
+    | not\ (?:actually\ |really\ )?a\ (?:real\ )?(?:bug|issue|problem)\b
+    | (?:the\ )?code\ is\ (?:actually\ |in\ fact\ )?fine\b
+    | \bretract(?:ing|ed)?\ this\b
+    | \bdisregard\ (?:this|that)\b
+    | \bignore\ (?:this|that)\ (?:finding|blocker)\b
+    | \bno\ longer\ (?:a\ |an\ )?(?:concern|issue|blocker|problem)\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
 def detect_blocker(
     review_text: str,
     *,
@@ -276,14 +328,36 @@ def detect_blocker(
     words: tuple[str, str, str] = VERDICT_WORDS,
 ) -> bool:
     """True if the verdict is `needs changes` (the block-severity entry,
-    `glyphs[2]` / `words[2]`) OR any `🚨 **Blocker:**` line appears in
-    the body. Either signal pauses auto-merge."""
+    `glyphs[2]` / `words[2]`) OR any `🚨 **Blocker:**` bullet in the body
+    is still LIVE — i.e. wasn't retracted in its own text (see
+    `_blocker_bullet_spans` / `_BLOCKER_RETRACTION_RE`). Either signal
+    pauses auto-merge.
+
+    The verdict-word check is untouched by retraction: a model that
+    literally writes the `needs changes` marker is stating its own
+    conclusion, not describing a bullet that can be locally withdrawn —
+    second-guessing that word is a prompting/consistency problem, not
+    this function's job. Only the blocker-bullet scan below is
+    retraction-aware, per cora#29's "Related" item: a bullet a model
+    talks itself out of in the same breath shouldn't pause automerge on
+    its own."""
     if not review_text:
         return False
-    return bool(
-        _verdict_blocker_re(glyphs[2], words[2]).search(review_text)
-        or _BLOCKER_LINE_RE.search(review_text)
+    if _verdict_blocker_re(glyphs[2], words[2]).search(review_text):
+        return True
+    spans = _blocker_bullet_spans(review_text)
+    if not spans:
+        return False
+    live = [span for span in spans if not _BLOCKER_RETRACTION_RE.search(span)]
+    if live:
+        return True
+    # Every 🚨 Blocker bullet retracted itself locally — surface that a
+    # discount happened instead of silently dropping it (the engine's
+    # posture elsewhere is annotate/log, never delete quietly).
+    _gha_log(
+        f"detect_blocker retracted-bullets-discounted count={len(spans)}"
     )
+    return False
 
 
 # Verdict → check-run conclusion mapping. Maps the three Verdict values
