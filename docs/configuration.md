@@ -108,6 +108,14 @@ error.
 | Variable | Purpose |
 | --- | --- |
 | `AGENT_REVIEW_CI_VERDICT_GATE` | Default-true kill switch for the finalize-time CI-verdict gate |
+Linked-issue prefetch — fetching the issue(s) a PR's title/body
+references (via a closing keyword like `fixes #12` or a bare `#N`
+mention) and injecting title/state/body/earliest-comments into the
+initial prompt — is on by default and shares the same kill-switch shape:
+
+| Variable | Purpose |
+| --- | --- |
+| `AGENT_REVIEW_ISSUE_PREFETCH` | Set to `false` to disable the linked-issue pre-fetch. The `read_issue` deep-mode tool (below) is unaffected — it's controlled by `ReviewerConfig.local_issue_tools` |
 
 ## MCP And Tool Exposure
 

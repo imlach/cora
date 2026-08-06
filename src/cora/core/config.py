@@ -510,6 +510,29 @@ DEP_SOURCE_AUTO_DIRS: tuple[str, ...] = ("vendor", "node_modules")
 DEP_SOURCE_MAX_FILES_SCANNED = int(
     os.environ.get("DEP_SOURCE_MAX_FILES_SCANNED", "50000")
 )
+# Linked-issue prefetch (server-side fetch of GitHub issues a PR's
+# title/body references — see core/issue_context.py). Same
+# "don't leave it to the model to fetch" precedent as the release-notes
+# pre-fetch above: acceptance criteria and discussion live in the issue
+# thread, not the diff. Default-on kill switch
+# (`AGENT_REVIEW_ISSUE_PREFETCH`; only the literal "false" disables).
+ISSUE_PREFETCH_ENABLED = True
+# At most this many distinct same-repo issues get fetched per review —
+# closing-keyword refs ("fixes #12") first, bare "#N" mentions fill any
+# remaining slots.
+ISSUE_PREFETCH_MAX_ISSUES = 2
+# Per-issue body cap and per-comment cap (a few KB each) plus the
+# aggregate cap on the whole rendered block (~10K chars / ~2.5K tokens,
+# sized like `prefetch.RELEASE_NOTES_CHAR_CAP`). Acceptance criteria
+# live in the body and early comments, so the block prefers those and
+# notes what it dropped once the aggregate cap is hit.
+ISSUE_BODY_CHAR_CAP = 3_000
+ISSUE_COMMENT_CHAR_CAP = 1_500
+ISSUE_BLOCK_CHAR_CAP = 10_000
+# Comments fetched per issue before local capping — GitHub returns them
+# oldest-first, which is exactly "earliest comments" order, so a small
+# per_page bound here doubles as the recency cutoff.
+ISSUE_MAX_COMMENTS_FETCHED = 15
 
 # Whitelist of MCP-server tools exposed to the agent for PR review.
 # Live-infrastructure tools (kubectl_*, loki_query, prometheus_query,
@@ -547,6 +570,13 @@ READ_TOOLS = {
 # shadow the MCP server's same-named copies.
 LOCAL_REPO_TOOLS = {"grep_repo", "git_show"}
 
+# `read_issue` — an in-process pull tool alongside grep_repo/git_show,
+# served from `core/issue_context.py` instead of the local git checkout
+# (it calls `gh api`, not `git`). Kept as its own small set rather than
+# folded into LOCAL_REPO_TOOLS: different backend, and a same-repo-only
+# trust boundary worth toggling independently of the repo-checkout tools.
+LOCAL_ISSUE_TOOLS = {"read_issue"}
+
 # Observe-only write-intent tools served by
 # the actions MCP server (a second MCP session, deep mode only). Calling
 # these does NOT mutate anything; the server records intent +
@@ -567,9 +597,9 @@ WEB_TOOLS = {
 }
 
 # Union exposed to the agent loop — the loop routes each name to its
-# local handler (LOCAL_REPO_TOOLS) or whichever MCP session registered
-# it (everything else).
-ALLOWED_TOOLS = READ_TOOLS | ACTION_TOOLS | WEB_TOOLS | LOCAL_REPO_TOOLS
+# local handler (LOCAL_REPO_TOOLS, LOCAL_ISSUE_TOOLS) or whichever MCP
+# session registered it (everything else).
+ALLOWED_TOOLS = READ_TOOLS | ACTION_TOOLS | WEB_TOOLS | LOCAL_REPO_TOOLS | LOCAL_ISSUE_TOOLS
 
 # Grafana dashboard host for the per-PR drilldown link the reporter
 # embeds in comments / check-runs. Set per deployment via `GRAFANA_BASE_URL`.

@@ -205,6 +205,15 @@ class ReviewerConfig:
     ci_context_char_cap: int = _c.CI_CONTEXT_CHAR_CAP
     ci_log_tail_chars: int = _c.CI_LOG_TAIL_CHARS
 
+    # ── Linked-issue prefetch (server-side fetch of PR-referenced
+    #    issues; see core/issue_context.py) — default-on kill switch,
+    #    env `AGENT_REVIEW_ISSUE_PREFETCH` ──────────────────────────
+    issue_context_prefetch: bool = _c.ISSUE_PREFETCH_ENABLED
+    issue_prefetch_max_issues: int = _c.ISSUE_PREFETCH_MAX_ISSUES
+    issue_body_char_cap: int = _c.ISSUE_BODY_CHAR_CAP
+    issue_comment_char_cap: int = _c.ISSUE_COMMENT_CHAR_CAP
+    issue_block_char_cap: int = _c.ISSUE_BLOCK_CHAR_CAP
+
     # ── Retrieval (consumed via the RetrievalProvider seam) ──────────
     qdrant_url: str = _c.DEFAULT_QDRANT_URL
     tei_url: str = _c.DEFAULT_TEI_URL
@@ -242,6 +251,7 @@ class ReviewerConfig:
     action_tools: frozenset[str] = field(default_factory=lambda: frozenset(_c.ACTION_TOOLS))
     web_tools: frozenset[str] = field(default_factory=lambda: frozenset(_c.WEB_TOOLS))
     local_repo_tools: frozenset[str] = field(default_factory=lambda: frozenset(_c.LOCAL_REPO_TOOLS))
+    local_issue_tools: frozenset[str] = field(default_factory=lambda: frozenset(_c.LOCAL_ISSUE_TOOLS))
 
     # ── Dependency-source corpus (optional; deep mode's
     #    grep_repo(corpus="deps")) ────────────────────────────────────
@@ -492,6 +502,9 @@ class ReviewerConfig:
             ),
             # Finalize-time CI-verdict gate — default-true kill switch.
             ci_verdict_gate=getflag_on("AGENT_REVIEW_CI_VERDICT_GATE"),
+            # Linked-issue prefetch — default-true killswitch, same
+            # typo-safe shape as the context-injection switches above.
+            issue_context_prefetch=getflag_on("AGENT_REVIEW_ISSUE_PREFETCH"),
         )
 
         # Wall-time ops overrides: an explicit

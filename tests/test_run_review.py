@@ -220,6 +220,147 @@ def test_quick_happy_path(monkeypatch):
     assert rep.automerge_pauses == 0
 
 
+# ── Linked-issue prefetch wiring ──────────────────────────────────────
+
+
+def test_linked_issue_prefetch_reaches_the_initial_prompt(monkeypatch):
+    """End-to-end: a `fixes #7` reference in the PR body reaches
+    `issue_context.fetch_issue` with this review's repo, and the
+    trust-wrapped block lands in the prompt handed to the model call."""
+    _patch_common(monkeypatch)
+    import cora.core.issue_context as ic_mod
+    import cora.core.quick_review as quick_mod
+
+    meta = _metadata()
+    meta["body"] = "This fixes #7."
+    monkeypatch.setattr(prc_mod, "fetch_pr_metadata", lambda pr: meta)
+
+    def fake_fetch_issue(repo, number, *, cfg=None):
+        assert repo == "owner/repo"
+        assert number == 7
+        return {
+            "number": 7,
+            "title": "Widget breaks",
+            "state": "open",
+            "url": "https://github.com/owner/repo/issues/7",
+            "body": "Acceptance criteria: widget must not break.",
+            "comments": [],
+            "comment_count_total": 0,
+        }
+
+    monkeypatch.setattr(ic_mod, "fetch_issue", fake_fetch_issue)
+
+    captured: dict = {}
+
+    async def fake_quick(**kwargs):
+        captured["prompt"] = kwargs["initial_user_prompt"]
+        return "🟢 looks good\n\nClean change.", None
+
+    monkeypatch.setattr(quick_mod, "quick_review_call", fake_quick)
+
+    cfg = _cfg()
+    rep = RecordingReporter()
+    run_review(cfg, reporter=rep, retrieval=NullRetrievalProvider())
+
+    prompt = captured["prompt"]
+    assert "## Linked issue(s) (pre-fetched)" in prompt
+    assert "Widget breaks" in prompt
+    assert "Acceptance criteria: widget must not break." in prompt
+    assert "<untrusted-content" in prompt
+
+
+def test_linked_issue_prefetch_skipped_for_bot_author(monkeypatch):
+    """Bot-authored PRs (Renovate/Dependabot) skip the prefetch — same
+    reasoning as the CLAUDE.md/retrieval skip: no human-authored issue
+    link to chase down."""
+    _patch_common(monkeypatch)
+    import cora.core.issue_context as ic_mod
+    import cora.core.quick_review as quick_mod
+
+    meta = _metadata()
+    meta["body"] = "This fixes #7."
+    meta["author"] = {"login": "renovate[bot]", "is_bot": True}
+    monkeypatch.setattr(prc_mod, "fetch_pr_metadata", lambda pr: meta)
+
+    calls: list = []
+    monkeypatch.setattr(
+        ic_mod, "fetch_issue", lambda *a, **k: calls.append((a, k)) or None
+    )
+
+    captured: dict = {}
+
+    async def fake_quick(**kwargs):
+        captured["prompt"] = kwargs["initial_user_prompt"]
+        return "🟢 looks good\n\nClean change.", None
+
+    monkeypatch.setattr(quick_mod, "quick_review_call", fake_quick)
+
+    cfg = _cfg()
+    rep = RecordingReporter()
+    run_review(cfg, reporter=rep, retrieval=NullRetrievalProvider())
+
+    assert calls == []
+    assert "Linked issue" not in captured["prompt"]
+
+
+def test_linked_issue_prefetch_killswitch(monkeypatch):
+    """`cfg.issue_context_prefetch=False` (env `AGENT_REVIEW_ISSUE_PREFETCH
+    =false`) disables the prefetch even when a reference is present."""
+    _patch_common(monkeypatch)
+    import cora.core.issue_context as ic_mod
+    import cora.core.quick_review as quick_mod
+
+    meta = _metadata()
+    meta["body"] = "This fixes #7."
+    monkeypatch.setattr(prc_mod, "fetch_pr_metadata", lambda pr: meta)
+
+    calls: list = []
+    monkeypatch.setattr(
+        ic_mod, "fetch_issue", lambda *a, **k: calls.append((a, k)) or None
+    )
+
+    captured: dict = {}
+
+    async def fake_quick(**kwargs):
+        captured["prompt"] = kwargs["initial_user_prompt"]
+        return "🟢 looks good\n\nClean change.", None
+
+    monkeypatch.setattr(quick_mod, "quick_review_call", fake_quick)
+
+    cfg = _cfg(issue_context_prefetch=False)
+    rep = RecordingReporter()
+    run_review(cfg, reporter=rep, retrieval=NullRetrievalProvider())
+
+    assert calls == []
+    assert "Linked issue" not in captured["prompt"]
+
+
+def test_linked_issue_prefetch_no_references_is_a_noop(monkeypatch):
+    _patch_common(monkeypatch)
+    import cora.core.issue_context as ic_mod
+    import cora.core.quick_review as quick_mod
+
+    calls: list = []
+    monkeypatch.setattr(
+        ic_mod, "fetch_issue", lambda *a, **k: calls.append((a, k)) or None
+    )
+
+    captured: dict = {}
+
+    async def fake_quick(**kwargs):
+        captured["prompt"] = kwargs["initial_user_prompt"]
+        return "🟢 looks good\n\nClean change.", None
+
+    monkeypatch.setattr(quick_mod, "quick_review_call", fake_quick)
+
+    cfg = _cfg()
+    rep = RecordingReporter()
+    run_review(cfg, reporter=rep, retrieval=NullRetrievalProvider())
+
+    assert calls == []
+    assert "Linked issue" not in captured["prompt"]
+
+
 # ── Deep mode: wall-hit → T1 continuation ────────────────────────────
 
 

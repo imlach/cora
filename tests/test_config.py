@@ -48,6 +48,14 @@ def test_defaults_mirror_engine_constants():
     assert d.context_injection_comments == c.CONTEXT_INJECTION_COMMENTS
     assert d.context_injection_ci_green == c.CONTEXT_INJECTION_CI_GREEN
     assert d.ci_verdict_gate == c.CI_VERDICT_GATE_ENABLED
+    # Linked-issue prefetch — killswitch + caps + tool allow-set.
+    assert d.issue_context_prefetch == c.ISSUE_PREFETCH_ENABLED
+    assert d.issue_context_prefetch is True
+    assert d.issue_prefetch_max_issues == c.ISSUE_PREFETCH_MAX_ISSUES
+    assert d.issue_body_char_cap == c.ISSUE_BODY_CHAR_CAP
+    assert d.issue_comment_char_cap == c.ISSUE_COMMENT_CHAR_CAP
+    assert d.issue_block_char_cap == c.ISSUE_BLOCK_CHAR_CAP
+    assert d.local_issue_tools == frozenset(c.LOCAL_ISSUE_TOOLS)
     assert d.transcript_source == c.DEFAULT_TRANSCRIPT_SOURCE
     # Exhausted-spiral escalation — on by default (killswitch), like the
     # re-draw it backstops.
@@ -406,3 +414,19 @@ def test_from_env_parses_dep_source_max_files_scanned():
         ReviewerConfig.from_env({}).dep_source_max_files_scanned
         == c.DEP_SOURCE_MAX_FILES_SCANNED
     )
+# ── Linked-issue prefetch killswitch ─────────────────────────────────
+
+
+def test_from_env_issue_prefetch_killswitch():
+    # Default-true killswitch: only the literal "false" (case-insensitive)
+    # disables — same typo-safe parse as the context-injection switches.
+    assert ReviewerConfig.from_env({}).issue_context_prefetch is True
+    assert ReviewerConfig.from_env(
+        {"AGENT_REVIEW_ISSUE_PREFETCH": "false"}
+    ).issue_context_prefetch is False
+    assert ReviewerConfig.from_env(
+        {"AGENT_REVIEW_ISSUE_PREFETCH": "FALSE"}
+    ).issue_context_prefetch is False
+    assert ReviewerConfig.from_env(
+        {"AGENT_REVIEW_ISSUE_PREFETCH": "0"}
+    ).issue_context_prefetch is True  # typo-safe: stays enabled
