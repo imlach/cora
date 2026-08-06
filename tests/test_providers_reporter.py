@@ -167,13 +167,22 @@ def test_github_complete_check_calls_engine(monkeypatch):
 
 def test_github_post_review_renders_then_posts(monkeypatch):
     posted = {}
+    minimized = []
     monkeypatch.setattr("cora.core.summary.make_review_comment", lambda *a, **k: "RENDERED")
     monkeypatch.setattr(
-        "cora.core.comment.post_or_edit_comment",
-        lambda repo, pr, body: posted.update({"repo": repo, "pr": pr, "body": body}),
+        "cora.core.comment.update_run_comment",
+        lambda repo, pr, body, *, final: posted.update(
+            {"repo": repo, "pr": pr, "body": body, "final": final}
+        ),
+    )
+    monkeypatch.setattr(
+        "cora.core.comment.minimize_superseded_comments",
+        lambda repo, pr: minimized.append((repo, pr)),
     )
     GitHubReporter("o/r", "7", model="m").post_review(_result())
-    assert posted == {"repo": "o/r", "pr": "7", "body": "RENDERED"}
+    assert posted == {"repo": "o/r", "pr": "7", "body": "RENDERED", "final": True}
+    # Collapse of older comments runs AFTER this run's own is finalised.
+    assert minimized == [("o/r", "7")]
 
 
 def test_github_post_review_default_off_uses_comment_not_review(monkeypatch):
@@ -182,9 +191,10 @@ def test_github_post_review_default_off_uses_comment_not_review(monkeypatch):
     posted = {}
     monkeypatch.setattr("cora.core.summary.make_review_comment", lambda *a, **k: "RENDERED")
     monkeypatch.setattr(
-        "cora.core.comment.post_or_edit_comment",
-        lambda repo, pr, body: posted.update({"repo": repo, "pr": pr, "body": body}),
+        "cora.core.comment.update_run_comment",
+        lambda repo, pr, body, *, final: posted.update({"repo": repo, "pr": pr, "body": body}),
     )
+    monkeypatch.setattr("cora.core.comment.minimize_superseded_comments", lambda repo, pr: None)
     monkeypatch.setattr(
         "cora.core.comment.create_pr_review",
         lambda *a, **k: pytest.fail("create_pr_review must not run when default-off"),
@@ -198,8 +208,12 @@ def test_github_post_review_files_first_class_review_when_enabled(monkeypatch):
     reviewed = {}
     monkeypatch.setattr("cora.core.summary.make_review_comment", lambda *a, **k: "RENDERED")
     monkeypatch.setattr(
-        "cora.core.comment.post_or_edit_comment",
-        lambda *a, **k: pytest.fail("post_or_edit_comment must not run when review-on"),
+        "cora.core.comment.update_run_comment",
+        lambda *a, **k: pytest.fail("update_run_comment must not run when review-on"),
+    )
+    monkeypatch.setattr(
+        "cora.core.comment.minimize_superseded_comments",
+        lambda *a, **k: pytest.fail("minimize_superseded_comments must not run when review-on"),
     )
     monkeypatch.setattr(
         "cora.core.comment.create_pr_review",
@@ -265,13 +279,20 @@ def test_from_config_threads_use_github_review_and_words():
 
 def test_github_post_skip_renders_then_posts(monkeypatch):
     posted = {}
+    minimized = []
     monkeypatch.setattr("cora.core.comment.make_skip_comment", lambda reason: f"SKIP:{reason}")
     monkeypatch.setattr(
-        "cora.core.comment.post_or_edit_comment",
-        lambda repo, pr, body: posted.update({"body": body}),
+        "cora.core.comment.update_run_comment",
+        lambda repo, pr, body, *, final: posted.update({"body": body, "final": final}),
+    )
+    monkeypatch.setattr(
+        "cora.core.comment.minimize_superseded_comments",
+        lambda repo, pr: minimized.append((repo, pr)),
     )
     GitHubReporter("o/r", "7").post_skip("no key")
-    assert posted["body"] == "SKIP:no key"
+    assert posted == {"body": "SKIP:no key", "final": True}
+    # A skip is a completed run — same collapse-the-rest treatment as a verdict.
+    assert minimized == [("o/r", "7")]
 
 
 def test_github_pause_automerge_delegates(monkeypatch):
@@ -335,7 +356,7 @@ def test_github_post_in_progress_renders_then_posts(monkeypatch):
 
     monkeypatch.setattr("cora.core.comment.make_initial_comment", fake_initial)
     monkeypatch.setattr(
-        "cora.core.comment.post_or_edit_comment",
+        "cora.core.comment.create_progress_comment",
         lambda repo, pr, body: posted.update({"repo": repo, "pr": pr, "body": body}),
     )
     started = datetime(2026, 6, 1, tzinfo=timezone.utc)
@@ -371,16 +392,18 @@ def test_github_write_summary_delegates_with_context(monkeypatch):
 def test_github_post_skip_exposes_configured_app_token_to_comment_helper(monkeypatch):
     seen = {}
 
-    def fake_post(repo, pr, body):
+    def fake_post(repo, pr, body, *, final):
         seen.update(
             repo=repo,
             pr=pr,
             body=body,
+            final=final,
             app_token=os.environ.get("CORA_GH_TOKEN"),
         )
 
     monkeypatch.delenv("CORA_GH_TOKEN", raising=False)
-    monkeypatch.setattr("cora.core.comment.post_or_edit_comment", fake_post)
+    monkeypatch.setattr("cora.core.comment.update_run_comment", fake_post)
+    monkeypatch.setattr("cora.core.comment.minimize_superseded_comments", lambda repo, pr: None)
     GitHubReporter("o/r", "7", github_app_token="TOK").post_skip("no verdict")
 
     assert seen["repo"] == "o/r"
