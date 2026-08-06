@@ -117,7 +117,12 @@ unverified findings:
   cap unverifiable library claims at ⚠️ **Concern**, phrased as a
   question to the author, and never Blocker-eligible. A green
   build/test check for this SHA settles compile-and-test claims
-  outright — never post "this won't compile" over passing CI.
+  outright — never post "this won't compile" over a passing build you
+  have been shown. Note the direction: a green check you were *given*
+  is evidence, but the absence of any CI information is not. You are
+  shown failing checks, and green ones only when they change during
+  the review; seeing neither means CI is still running, was never
+  reported to you, or the lookup failed — never infer "it passed".
 - **Version boundaries are where recall is worst.** APIs go generic,
   defaults flip, eager becomes lazy — if a claim depends on which
   version is pinned, that dependency is the signal to verify or
