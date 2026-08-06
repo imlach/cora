@@ -12,6 +12,8 @@ network, no real `gh` invocation.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -342,3 +344,53 @@ def test_generic_marker_stays_at_position_zero(monkeypatch):
     assert posted.splitlines()[1] == comment_mod._verdict_marker("909")
     assert _is_own_body(posted) is True
     assert _is_cora_body(posted) is True
+
+
+# ── the jq predicates, executed by real jq ──────────────────────────
+#
+# The rest of this file mirrors the predicates in Python (`_is_cora_body`
+# / `_is_own_body`) so the fake store can stay offline — which means a
+# malformed jq expression would sail straight through every test above
+# and only fail in production, where `update_run_comment` turns a
+# non-zero jq exit into a fatal RuntimeError. These two run the real
+# binary against a real comment listing to close that gap.
+
+
+def _jq(filter_expr: str, payload: list[dict]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["jq", filter_expr],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+    )
+
+
+_JQ = shutil.which("jq")
+
+
+@pytest.mark.skipif(_JQ is None, reason="jq not installed")
+def test_own_comment_predicate_parses_and_selects_only_this_run():
+    listing = [
+        {"id": 7, "body": f"{COMMENT_MARKER}\n{comment_mod._verdict_marker('12345')}\nmine"},
+        {"id": 8, "body": f"{COMMENT_MARKER}\n{comment_mod._verdict_marker('999')}\nolder run"},
+        {"id": 9, "body": "a human comment quoting <!-- cora:verdict:12345 --> in prose"},
+    ]
+    pred = comment_mod._own_comment_jq("12345")
+    proc = _jq(f"[.[] | select({pred})] | first | .id // empty", listing)
+
+    assert proc.returncode == 0, f"jq rejected the predicate: {proc.stderr}"
+    assert proc.stdout.strip() == "7"
+
+
+@pytest.mark.skipif(_JQ is None, reason="jq not installed")
+def test_discovery_predicate_parses_and_finds_legacy_and_current():
+    listing = [
+        {"id": 1, "body": f"{COMMENT_MARKER}\n{comment_mod._progress_marker('1')}\ncurrent"},
+        {"id": 2, "body": f"{LEGACY_COMMENT_MARKERS[0]}\npre-migration"},
+        {"id": 3, "body": "unrelated human comment"},
+    ]
+    pred = comment_mod._startswith_any_jq((COMMENT_MARKER, *LEGACY_COMMENT_MARKERS))
+    proc = _jq(f"[.[] | select({pred}) | .id]", listing)
+
+    assert proc.returncode == 0, f"jq rejected the predicate: {proc.stderr}"
+    assert json.loads(proc.stdout) == [1, 2]
