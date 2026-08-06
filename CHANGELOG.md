@@ -8,6 +8,8 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-08-06
+
 ### Added
 - **Generic extra MCP sessions** (`MCP_SERVERS`, a JSON array of
   `{"name", "url", "token_env", "required"}` objects) — a deployment
