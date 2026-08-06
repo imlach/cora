@@ -8,6 +8,25 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Fixed
+- **`detect_blocker` no longer counts a retracted `🚨 Blocker` bullet.**
+  Observed live on imlach/cora#25: a review posted a Blocker bullet reading
+  *"This is a false alarm from the truncated diff display — the code is
+  fine"*, then stated *"I have no actual blockers"* — the marker text alone
+  still paused automerge and counted toward `tier_verdict` telemetry (#29's
+  "Related" item). `detect_blocker` now extracts each Blocker bullet's own
+  text (including wrapped continuation lines) and discounts it only when
+  that bullet itself contains a narrow, unambiguous retraction phrase
+  ("false alarm", "not actually a bug", "the code is fine", …) that no
+  contrastive clause walks back — a hedge ("might be a problem"), a
+  narrowing ("the surrounding code is fine, *but* this path crashes"), or
+  a reassuring sentence *elsewhere* in the body never discounts a bullet.
+  A body where every Blocker bullet retracts
+  still logs the discount (`::notice::detect_blocker
+  retracted-bullets-discounted`) rather than silently dropping it. The
+  verdict-word check (a literal `needs changes` marker) is untouched —
+  that's the model's own stated conclusion, not a bullet to reason about.
+
 ## [0.1.5] - 2026-08-06
 
 ### Added
@@ -122,25 +141,6 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   the pinned/lockfile version isn't verification. Quick mode gets a
   one-line parallel, since it has no tools to verify a library claim at
   all (#23).
-
-### Fixed
-- **`detect_blocker` no longer counts a retracted `🚨 Blocker` bullet.**
-  Observed live on imlach/cora#25: a review posted a Blocker bullet reading
-  *"This is a false alarm from the truncated diff display — the code is
-  fine"*, then stated *"I have no actual blockers"* — the marker text alone
-  still paused automerge and counted toward `tier_verdict` telemetry (#29's
-  "Related" item). `detect_blocker` now extracts each Blocker bullet's own
-  text (including wrapped continuation lines) and discounts it only when
-  that bullet itself contains a narrow, unambiguous retraction phrase
-  ("false alarm", "not actually a bug", "the code is fine", …) that no
-  contrastive clause walks back — a hedge ("might be a problem"), a
-  narrowing ("the surrounding code is fine, *but* this path crashes"), or
-  a reassuring sentence *elsewhere* in the body never discounts a bullet.
-  A body where every Blocker bullet retracts
-  still logs the discount (`::notice::detect_blocker
-  retracted-bullets-discounted`) rather than silently dropping it. The
-  verdict-word check (a literal `needs changes` marker) is untouched —
-  that's the model's own stated conclusion, not a bullet to reason about.
 
 ## [0.1.4] - 2026-08-05
 
