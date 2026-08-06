@@ -222,6 +222,8 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
         ci_enabled=cfg.context_injection_ci,
         head_enabled=cfg.context_injection_head,
         comments_enabled=cfg.context_injection_comments,
+        ci_green_enabled=cfg.context_injection_ci_green,
+        own_check_run_name=cfg.check_run_name,
     )
 
     mcp_token = (cfg.mcp_token or "").strip()

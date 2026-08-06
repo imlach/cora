@@ -186,6 +186,17 @@ class ReviewerConfig:
     context_injection_ci: bool = _c.CONTEXT_INJECTION_CI
     context_injection_head: bool = _c.CONTEXT_INJECTION_HEAD
     context_injection_comments: bool = _c.CONTEXT_INJECTION_COMMENTS
+    # Green-delta sub-toggle of the CI source — a check-run turning
+    # success also injects, not just a new failure. See
+    # `core.config.CONTEXT_INJECTION_CI_GREEN`.
+    context_injection_ci_green: bool = _c.CONTEXT_INJECTION_CI_GREEN
+
+    # ── CI-verdict gate (finalize-time backstop; see cora.review._ci_gate) ──
+    # On a settled `needs changes` verdict, one bounded re-poll of the
+    # reviewed HEAD SHA's check-runs; blocker findings matching a narrow
+    # compile/test-failure claim pattern get annotated (and the verdict
+    # downgraded one step) when CI already passed. Default-on kill switch.
+    ci_verdict_gate: bool = _c.CI_VERDICT_GATE_ENABLED
 
     # ── Per-bundle caps ──────────────────────────────────────────────
     diff_char_cap: int = _c.DIFF_CHAR_CAP
@@ -462,6 +473,11 @@ class ReviewerConfig:
             context_injection_comments=getflag_on(
                 "AGENT_REVIEW_CONTEXT_INJECTION_COMMENTS"
             ),
+            context_injection_ci_green=getflag_on(
+                "AGENT_REVIEW_CONTEXT_INJECTION_CI_GREEN"
+            ),
+            # Finalize-time CI-verdict gate — default-true kill switch.
+            ci_verdict_gate=getflag_on("AGENT_REVIEW_CI_VERDICT_GATE"),
         )
 
         # Wall-time ops overrides: an explicit

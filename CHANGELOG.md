@@ -31,6 +31,39 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   even with no fetch session configured — now only appears (in generic
   "a fetch tool for upstream docs" wording, not a hardcoded tool name)
   when one actually is.
+- **A CI-verdict gate for false compile/test-failure blockers** (#23).
+  A deep review that runs concurrently with the build can finish first
+  and post 🚨 Blocker findings claiming a compile or test failure that
+  CI itself contradicts a few minutes later — the `needs changes`
+  verdict then rests entirely on claims CI has already disproved. Two
+  cooperating mechanisms:
+  - **Green-delta context injection.** The push-based context refresher
+    (`context_refresher.py`) already injects fresh CI context on a new
+    *failure*; it now also injects when a check-run transitions to
+    *success*, especially one that was pending or missing on the start
+    snapshot. The injected text names the check and tells the model to
+    re-verify or downgrade any compile/test-failure claim it made —
+    this is the primary fix, since the model self-corrects with the
+    signal in context. Killswitch
+    `AGENT_REVIEW_CONTEXT_INJECTION_CI_GREEN` (default-true, shares the
+    CI source's cadence; the master `AGENT_REVIEW_CONTEXT_INJECTION_CI`
+    toggle disables both).
+  - **Finalize-time CI-verdict gate** (`cora.review._ci_gate`) — the
+    backstop for a review that finishes before CI does. On a settled
+    `needs changes` verdict, one bounded re-poll of check-runs for the
+    reviewed HEAD SHA (never a different SHA — a green run for an older
+    commit proves nothing here); if every relevant check is green,
+    blocker findings matching a narrow, documented compile/test-failure
+    claim pattern get a visible harness note appended, and — only when
+    EVERY blocker in the review matches — the verdict downgrades one
+    step (`needs changes` → `minor`) with an explanatory line. Findings
+    are always annotated, never deleted. The gate runs before the
+    verdict check-run posts, so a fully-contradicted review reports a
+    non-blocking check conclusion instead of a red one; the
+    automerge pause deliberately still fires (the blocker markers stay
+    in the body) so a human reads the annotated findings before merge.
+    Soft-fails on any API error (posts the review unchanged);
+    killswitch `AGENT_REVIEW_CI_VERDICT_GATE` (default-true).
 - **Per-result char cap on the in-process repo tools**
   (`TOOL_RESULT_CHAR_CAP`, env `AGENT_REVIEW_TOOL_RESULT_CHAR_CAP`,
   default 16 000 chars). `git_show` file content is head+tail truncated

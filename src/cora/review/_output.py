@@ -22,6 +22,7 @@ from cora.core.leak import (
 )
 from cora.core.log import _gha_log
 from cora.result import ReviewResult
+from cora.review._ci_gate import apply_ci_verdict_gate
 from cora.review._state import ReviewRun
 
 
@@ -437,12 +438,21 @@ async def produce_output(run: ReviewRun) -> ReviewResult | None:  # noqa: PLR091
     run.body_to_post = body_to_post
 
     run.verdict = parse_verdict_from_body(body_to_post)
+    # Pre-gate verdict: the tier_verdict events below report what the
+    # model itself concluded, not what the gate rewrote it to.
     verdict = run.verdict
+
+    # CI-verdict gate (issue #23 backstop) runs BEFORE the check-run
+    # posts: `complete_check` is first-write-wins, so gating after the
+    # post would leave a red required check standing for a verdict the
+    # gate no longer holds. May rewrite `run.verdict`/`run.body_to_post`.
+    await apply_ci_verdict_gate(run)
+
     _finalize_observability(
         run,
-        verdict_line=f"verdict: {verdict}" if verdict else "no verdict parsed",
-        conclusion=verdict_to_conclusion(verdict),
-        body_for_summary=body_to_post,
+        verdict_line=f"verdict: {run.verdict}" if run.verdict else "no verdict parsed",
+        conclusion=verdict_to_conclusion(run.verdict),
+        body_for_summary=run.body_to_post,
         leak_flag=False,
     )
 

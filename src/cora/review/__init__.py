@@ -20,7 +20,8 @@ below is the whole control flow:
     _gate       TriggerPolicy gate + GHA rate-cap probe
     _context    concurrent prefetches, retrieval pre-pack, prompt assembly
     _tiers      quick call / deep loop, escalation ladder, second opinion
-    _output     leak pipeline, observability trail, verdict parse
+    _output     leak pipeline, observability trail, CI-verdict gate
+                (`_ci_gate`, issue #23 — pre-check-post), verdict parse
     _patches    propose_patch dispatch + T2 patch escalation
     _finalize   ReviewResult, eval dumps, comment post, automerge pause
 
@@ -47,7 +48,8 @@ from cfg here; `ReviewerConfig.from_env()` folds the workflow env in
 / `AGENT_REVIEW_SKIP_T0` / `AGENT_REVIEW_PATCH_ESCALATION`, the
 `T0_WALL_TIME_S` / `T1_WALL_TIME_S` / `WALL_TIME_S` ops overrides,
 `CLASSIFIER_LABEL`, `AGENT_REVIEW_CONTEXT_INJECTION*`,
-`REVIEWER_TRANSCRIPT_SOURCE`). Deliberately still env-read (runtime
+`AGENT_REVIEW_CI_VERDICT_GATE`, `REVIEWER_TRANSCRIPT_SOURCE`). Deliberately
+still env-read (runtime
 facts or env-folded at their own layer, NOT reviewer config):
   - `AGENT_REVIEW_CACHE_DIR` / `AGENT_REVIEW_CACHE_TTL_S` — call-time
     ops overrides inside `core.retrieval` (config-mirrored defaults).
