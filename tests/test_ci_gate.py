@@ -89,13 +89,25 @@ def test_all_green_false_when_one_failing():
     assert ci_gate_mod._all_green(checks) is False
 
 
-def test_all_green_true_when_all_completed_clean():
+def test_all_green_true_only_when_every_check_actually_succeeded():
     checks = [
         {"status": "completed", "conclusion": "success"},
-        {"status": "completed", "conclusion": "skipped"},
-        {"status": "completed", "conclusion": "neutral"},
+        {"status": "completed", "conclusion": "success"},
     ]
     assert ci_gate_mod._all_green(checks) is True
+
+
+def test_skipped_or_neutral_is_not_evidence_the_build_passed():
+    """A job that never ran can't contradict a compile claim. `skipped`
+    is the common case — a path filter or `if:` gate on the build job —
+    and treating it as green would let the gate suppress a true blocker
+    on the strength of a build that was never attempted."""
+    for conclusion in ("skipped", "neutral", "stale", None):
+        checks = [
+            {"status": "completed", "conclusion": "success"},
+            {"status": "completed", "conclusion": conclusion},
+        ]
+        assert ci_gate_mod._all_green(checks) is False, conclusion
 
 
 def test_annotate_contradicted_blockers_appends_note_only_to_matches():
@@ -434,3 +446,90 @@ def test_gate_no_relevant_checks_is_noop(monkeypatch):
 
     assert result.verdict == "needs changes"
     assert result.body == _BLOCKER_BODY.strip()
+
+
+# ── the downgrade must see every blocker the automerge gate sees ──────
+# `detect_blocker` (core/leak.py) matches `🚨 **Blocker:**` anywhere;
+# the gate annotates only the prompt's bullet form. Counting with the
+# narrow pattern let a differently-formatted REAL blocker go uncounted,
+# so one contradicted bullet equalled "every blocker" and downgraded a
+# review whose actual blocker was never examined.
+
+
+def test_non_bullet_blocker_is_counted_so_no_downgrade():
+    body = (
+        "🔴 needs changes\n\n"
+        "- 🚨 **Blocker:** this won't compile\n"
+        "🚨 **Blocker:** auth.go:44 — token comparison is not constant-time\n"
+    )
+    _new, total, contradicted = ci_gate_mod._annotate_contradicted_blockers(body)
+    assert total == 2, "the non-bullet blocker must still count"
+    assert contradicted == 1
+    assert total != contradicted, "a real blocker must block the downgrade"
+
+
+def test_star_bullet_blocker_is_counted_too():
+    body = (
+        "🔴 needs changes\n\n"
+        "- 🚨 **Blocker:** tests will fail\n"
+        "* 🚨 **Blocker:** unrelated real problem\n"
+    )
+    _new, total, contradicted = ci_gate_mod._annotate_contradicted_blockers(body)
+    assert (total, contradicted) == (2, 1)
+
+
+def test_all_bullet_blockers_contradicted_still_downgrades():
+    """The guard must not disarm the feature it protects."""
+    body = (
+        "🔴 needs changes\n\n"
+        "- 🚨 **Blocker:** this won't compile\n"
+        "- 🚨 **Blocker:** the tests will fail without a database\n"
+    )
+    _new, total, contradicted = ci_gate_mod._annotate_contradicted_blockers(body)
+    assert total == contradicted == 2
+
+
+# ── the reviewer's own workflow job must not block its own gate ───────
+
+
+def test_own_workflow_job_is_excluded_by_run_id(monkeypatch):
+    monkeypatch.setenv("GITHUB_RUN_ID", "12345")
+    checks = [
+        {
+            "name": "review",
+            "status": "in_progress",
+            "conclusion": None,
+            "html_url": "https://github.com/o/r/actions/runs/12345/job/9",
+        },
+        {"name": "build", "status": "completed", "conclusion": "success"},
+    ]
+    relevant = ci_gate_mod._relevant_check_runs(checks, own_check="cora")
+    assert [c["name"] for c in relevant] == ["build"]
+    assert ci_gate_mod._all_green(relevant) is True
+
+
+def test_another_runs_check_is_not_excluded(monkeypatch):
+    monkeypatch.setenv("GITHUB_RUN_ID", "12345")
+    checks = [
+        {
+            "name": "build",
+            "status": "in_progress",
+            "conclusion": None,
+            "html_url": "https://github.com/o/r/actions/runs/99999/job/1",
+        },
+    ]
+    relevant = ci_gate_mod._relevant_check_runs(checks, own_check="cora")
+    assert [c["name"] for c in relevant] == ["build"]
+
+
+def test_no_run_id_env_excludes_nothing_extra(monkeypatch):
+    monkeypatch.delenv("GITHUB_RUN_ID", raising=False)
+    checks = [
+        {
+            "name": "build",
+            "status": "completed",
+            "conclusion": "success",
+            "html_url": "https://github.com/o/r/actions/runs/12345/job/9",
+        },
+    ]
+    assert len(ci_gate_mod._relevant_check_runs(checks, own_check="cora")) == 1

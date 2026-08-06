@@ -418,7 +418,27 @@ class ContextRefresher:
         newly_green = self._newly_green_checks(prior_signature, signature)
         if not newly_green:
             return None
-        return self._green_delta_injection(head, newly_green)
+        return self._green_delta_injection(
+            head, newly_green, all_settled=self._all_relevant_settled(signature)
+        )
+
+    def _all_relevant_settled(
+        self, signature: "list[tuple[str, str, str]]"
+    ) -> bool:
+        """True when every relevant check has finished, whatever the
+        outcome. Distinguishes "CI is done and clean" from "one check
+        finished, the build is still running" — the injection wording
+        depends on it, because telling the model its finding is
+        "contradicted by CI" on the strength of a lint job while the
+        build is still in flight is false authority."""
+        return all(
+            status == "completed"
+            for name, status, _conclusion in signature
+            if name
+            and name != "required"
+            and not name.startswith("agentic-pr-review")
+            and name != self._own_check_run_name
+        )
 
     def _newly_green_checks(
         self,
@@ -447,7 +467,9 @@ class ContextRefresher:
             newly_green.append(name)
         return newly_green
 
-    def _green_delta_injection(self, head: str, newly_green: list[str]) -> str:
+    def _green_delta_injection(
+        self, head: str, newly_green: list[str], *, all_settled: bool = True
+    ) -> str:
         """Build the injection body for check-run(s) that just turned
         green — the issue #23 motivating shape: a review forms a 🚨
         Blocker asserting a build/test failure while the real check is
@@ -466,12 +488,27 @@ class ContextRefresher:
             "",
         ]
         for name in newly_green:
-            lines.append(
-                f"- build/test check `{name}` completed successfully for "
-                f"HEAD `{head}`. Findings asserting this code fails to "
-                "compile or fails tests are contradicted by CI; re-verify "
-                "or downgrade them."
-            )
+            # No "build/test" label — these are whatever checks the repo
+            # happens to run, and calling a lint job a build check is the
+            # false precision issue #23 is about in the first place.
+            lines.append(f"- `{name}` completed successfully for HEAD `{head}`.")
+        lines.append("")
+        lines.append(
+            # The directive is only warranted once CI has actually
+            # finished. While other checks are still running, a single
+            # green check contradicts nothing — saying otherwise is the
+            # same unearned authority the gate exists to remove.
+            "Every other check for this HEAD has also finished and "
+            "passed. A finding asserting this code fails to compile or "
+            "fails its tests is contradicted by CI — re-verify it, and "
+            "downgrade it unless you can point at something CI does not "
+            "cover."
+            if all_settled
+            else "Other checks for this HEAD are still running, so this "
+            "does not yet settle whether the build or tests pass. Treat "
+            "it as partial evidence only; do not downgrade a "
+            "compile/test finding on the strength of it alone."
+        )
         return wrap_injection(
             reason="CI check(s) transitioned to success since last observation",
             body="\n".join(lines),

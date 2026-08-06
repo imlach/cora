@@ -60,9 +60,11 @@ Design choices worth knowing:
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 
+from cora.core.leak import _BLOCKER_LINE_RE
 from cora.core.log import _gha_log
 from cora.review._state import ReviewRun
 
@@ -128,11 +130,31 @@ def _fetch_check_runs(repo: str, head_sha: str) -> list[dict] | None:
         return None
 
 
+def _is_own_workflow_run(cr: dict) -> bool:
+    """True when this check-run belongs to the Actions run we are
+    executing inside.
+
+    Name-based exclusion isn't enough. The reviewer publishes TWO
+    check-runs: the verdict check (`cfg.check_run_name`) and the
+    workflow JOB itself, whose name is whatever the workflow calls it —
+    `review` in the canonical wiring, anything in an adopter's. That job
+    is necessarily `in_progress` while this gate runs, so leaving it in
+    the relevant set means `_all_green` is permanently False and the
+    gate can never fire. Matching on `GITHUB_RUN_ID` in the check's URL
+    identifies it structurally, whatever it was named."""
+    run_id = os.environ.get("GITHUB_RUN_ID", "").strip()
+    if not run_id:
+        return False
+    urls = f"{cr.get('html_url') or ''} {cr.get('details_url') or ''}"
+    return f"/runs/{run_id}" in urls or f"/runs/{run_id}/" in urls
+
+
 def _relevant_check_runs(check_runs: list[dict], *, own_check: str) -> list[dict]:
     """Latest run per check name, excluding the reviewer's own verdict
-    check (+ its pre-rename prefix) and the `required` aggregator — same
-    exclusion `gather_ci_context` applies, for the same reason: neither
-    is evidence about the PR's build/test state."""
+    check (+ its pre-rename prefix), its own workflow job, and the
+    `required` aggregator — same exclusion `gather_ci_context` applies,
+    for the same reason: none is evidence about the PR's build/test
+    state."""
     latest: dict[str, dict] = {}
     for cr in check_runs:
         name = cr.get("name", "")
@@ -145,20 +167,29 @@ def _relevant_check_runs(check_runs: list[dict], *, own_check: str) -> list[dict
         if not name.startswith("agentic-pr-review")
         and name != own_check
         and name != "required"
+        and not _is_own_workflow_run(cr)
     ]
 
 
 def _all_green(check_runs: list[dict]) -> bool:
     """True only when there's at least one relevant check AND every one
-    of them is `completed` with a clean conclusion. Empty is NOT green —
+    of them is `completed` with conclusion `success`. Empty is NOT green —
     no relevant checks means no evidence to contradict a claim with, so
     the gate must not annotate on silence. A still-`in_progress`/`queued`
     check is also not green — the gate only fires once CI has actually
-    finished, not while it's still racing the review."""
+    finished, not while it's still racing the review.
+
+    `success` specifically, not merely "not failed": a `skipped` job
+    (path filter, `if:` gate, matrix exclude) or a `neutral`/`stale`
+    conclusion NEVER RAN, so it is not evidence the code compiles. This
+    is the burden the gate exists to respect — it suppresses findings,
+    so silence must never read as proof. Matches the green-delta
+    injection's own `conclusion == "success"` test in
+    `context_refresher._newly_green_checks`."""
     if not check_runs:
         return False
     return all(
-        cr.get("status") == "completed" and cr.get("conclusion") not in _BAD_CONCLUSIONS
+        cr.get("status") == "completed" and cr.get("conclusion") == "success"
         for cr in check_runs
     )
 
@@ -167,13 +198,23 @@ def _annotate_contradicted_blockers(body: str) -> tuple[str, int, int]:
     """Append the harness note to every blocker bullet whose text
     matches the narrow claim pattern. Returns `(new_body, total_blockers,
     contradicted_count)` — the caller downgrades the verdict only when
-    the two counts are equal and non-zero (EVERY blocker matched)."""
-    total = 0
+    the two counts are equal and non-zero (EVERY blocker matched).
+
+    `total_blockers` is counted with `leak._BLOCKER_LINE_RE`, the SAME
+    pattern `detect_blocker` uses to decide a review blocks, NOT the
+    bullet pattern used for annotation. The bullet form
+    (`- 🚨 **Blocker:** …`) is what the prompt asks for, but a model
+    that writes `* `, omits the dash, or puts the colon outside the bold
+    still produced a blocker — and if such a finding were invisible to
+    the count, one contradicted bullet could equal "every blocker" and
+    downgrade a review whose real blocker was never even looked at.
+    Counting wide and annotating narrow makes the mismatch fail closed:
+    the counts differ, so no downgrade."""
+    total = len(_BLOCKER_LINE_RE.findall(body))
     contradicted = 0
 
     def _sub(m: re.Match[str]) -> str:
-        nonlocal total, contradicted
-        total += 1
+        nonlocal contradicted
         line = m.group(0)
         if _CI_CONTRADICTION_CLAIM_RE.search(line):
             contradicted += 1
