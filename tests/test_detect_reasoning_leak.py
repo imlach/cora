@@ -695,3 +695,39 @@ def test_needs_changes_verdict_word_still_blocks_regardless_of_bullets():
     # bullets in the body.
     from cora.core.leak import detect_blocker
     assert detect_blocker("🔴 needs changes\n\nNo findings section at all.")
+
+
+def test_retraction_phrase_narrowed_by_contrast_still_blocker():
+    from cora.core.leak import detect_blocker
+    # "X is fine, BUT Y is broken" narrows the finding, it doesn't
+    # withdraw it. Discounting this would silently drop a live blocker —
+    # the one failure mode the phrase set is tuned against.
+    body = (
+        "🟡 minor\n\n"
+        "- 🚨 **Blocker:** `parse()` raises on empty input. The "
+        "surrounding code is fine, but this path crashes in prod.\n"
+    )
+    assert detect_blocker(body) is True
+
+
+def test_contrast_after_not_a_problem_still_blocker():
+    from cora.core.leak import detect_blocker
+    body = (
+        "🟡 minor\n\n"
+        "- 🚨 **Blocker:** Slow for tiny inputs — not really a problem "
+        "there, however at 10k rows it OOMs.\n"
+    )
+    assert detect_blocker(body) is True
+
+
+def test_contrast_before_retraction_is_still_a_retraction():
+    from cora.core.leak import detect_blocker
+    # The guard only looks AFTER the retraction phrase: a contrast
+    # leading INTO the withdrawal ("looks broken, but ... false alarm")
+    # is the retraction standing, not a narrowing of it.
+    body = (
+        "🟢 looks good\n\n"
+        "- 🚨 **Blocker:** Looks broken at first, but on re-reading "
+        "this is a false alarm.\n"
+    )
+    assert detect_blocker(body) is False

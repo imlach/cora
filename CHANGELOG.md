@@ -132,9 +132,11 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   "Related" item). `detect_blocker` now extracts each Blocker bullet's own
   text (including wrapped continuation lines) and discounts it only when
   that bullet itself contains a narrow, unambiguous retraction phrase
-  ("false alarm", "not actually a bug", "the code is fine", …) — a hedge
-  ("might be a problem") or a reassuring sentence *elsewhere* in the body
-  never discounts a bullet. A body where every Blocker bullet retracts
+  ("false alarm", "not actually a bug", "the code is fine", …) that no
+  contrastive clause walks back — a hedge ("might be a problem"), a
+  narrowing ("the surrounding code is fine, *but* this path crashes"), or
+  a reassuring sentence *elsewhere* in the body never discounts a bullet.
+  A body where every Blocker bullet retracts
   still logs the discount (`::notice::detect_blocker
   retracted-bullets-discounted`) rather than silently dropping it. The
   verdict-word check (a literal `needs changes` marker) is untouched —

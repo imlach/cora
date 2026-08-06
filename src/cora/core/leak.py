@@ -320,6 +320,27 @@ _BLOCKER_RETRACTION_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# A retraction phrase followed by a contrastive clause isn't a retraction —
+# it's a narrowing. "The surrounding code is fine, BUT this path crashes"
+# and "not really a problem there, HOWEVER at 10k rows it OOMs" both match
+# the phrases above while stating a live defect, and discounting them would
+# silently drop a real blocker (the one failure mode the phrase set is
+# tuned to avoid). Scanned only in the text AFTER the matched phrase,
+# inside the same bullet: a contrast before it ("this looks broken, but
+# it's a false alarm") is the retraction still standing.
+_RETRACTION_CONTRAST_RE = re.compile(
+    r"\b(?:but|however|although|though|nevertheless|still)\b", re.IGNORECASE
+)
+
+
+def _is_retracted(span: str) -> bool:
+    """True when this bullet's own text withdraws the finding outright —
+    a retraction phrase with no contrastive clause walking it back."""
+    m = _BLOCKER_RETRACTION_RE.search(span)
+    if not m:
+        return False
+    return not _RETRACTION_CONTRAST_RE.search(span, m.end())
+
 
 def detect_blocker(
     review_text: str,
@@ -348,7 +369,7 @@ def detect_blocker(
     spans = _blocker_bullet_spans(review_text)
     if not spans:
         return False
-    live = [span for span in spans if not _BLOCKER_RETRACTION_RE.search(span)]
+    live = [span for span in spans if not _is_retracted(span)]
     if live:
         return True
     # Every 🚨 Blocker bullet retracted itself locally — surface that a
