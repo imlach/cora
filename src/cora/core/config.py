@@ -31,6 +31,26 @@ LEGACY_COMMENT_MARKERS = (
     "<!-- agentic-review-loop:v1 -->",
 )
 
+# Run-scoped comment markers (cora#29). `COMMENT_MARKER` above still
+# opens every rendered comment BODY (`make_initial_comment` /
+# `make_review_comment` / `make_skip_comment`) as the generic "is this
+# a cora comment at all" signal — one of these two is prepended as a
+# further-first line in front of it when the comment is actually
+# posted (`cora.core.comment.create_progress_comment` /
+# `update_run_comment`), tying the comment to the GITHUB_RUN_ID that
+# wrote it and to which of the two comment kinds it is:
+#   <!-- cora:progress:<run_id> -->   in-flight placeholder, PATCHed
+#   <!-- cora:verdict:<run_id> -->    a completed review, replaced (not
+#                                     edited) by the next run, minimised
+#                                     once that next run's verdict lands
+# Prefixes, not full markers — `<run_id>` varies per run, so matching
+# "any cora comment" (`cora.core.comment`'s discovery predicate) checks
+# the prefix while matching "this run's own comment" appends the
+# concrete run id.
+PROGRESS_MARKER_PREFIX = "<!-- cora:progress:"
+VERDICT_MARKER_PREFIX = "<!-- cora:verdict:"
+MARKER_SUFFIX = " -->"
+
 # Verdict check-run name. It IS the authoritative verdict a deployment's
 # fail-closed required-check merge gate can key on. Deployments
 # rebrand via `ReviewerConfig.check_run_name` / `REVIEW_CHECK_RUN_NAME`.
