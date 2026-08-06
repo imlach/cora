@@ -55,7 +55,12 @@ Deep mode (`MAX_TOOL_ITERATIONS>0`) needs no extra infrastructure. With
 `git_show` tools over the PR's own checkout, which is enough for a
 reviewer to verify claims against the code it is reviewing. Point
 `MCP_URL` at an MCP server to add your own knowledge base or action
-surface on top.
+surface on top. Beyond the three named slots (`MCP_URL`,
+`MCP_ACTIONS_URL`, `WEB_FETCH_GATE_URL`), `MCP_SERVERS` (a JSON array)
+attaches any number of additional MCP sessions without a new env var per
+server — see
+[MCP And Tool Exposure](configuration.md#generic-extra-mcp-sessions-mcp_servers)
+in the configuration reference.
 
 `python -m cora` exits nonzero only for hard entrypoint failures, such as
 missing PR identity or an unhandled exception. Skipped reviews and review

@@ -28,10 +28,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 if TYPE_CHECKING:
     from cora.config import ReviewerConfig
+    from cora.core.mcp_sessions import McpServerSpec
     from cora.providers.git import GitProvider
 
 from cora.core.deep_review import (
@@ -194,6 +195,9 @@ async def continue_on_t1(
     mcp_actions_headers: dict[str, str] | None = None,
     web_fetch_url: str | None = None,
     web_fetch_headers: dict[str, str] | None = None,
+    # Generic extra MCP sessions (from `MCP_SERVERS`) — same shape as
+    # `deep_review_call`; see `cora.core.mcp_sessions`.
+    extra_sessions: "Sequence[McpServerSpec]" = (),
     allowed_tools: set[str],
     tool_arg_defaults: dict[str, dict[str, Any]] | None = None,
     # T1 gets a tighter iteration cap than T0 because the trajectory
@@ -258,36 +262,41 @@ async def continue_on_t1(
     # configured one is re-probed. T0 already passed this check, so a
     # failure here usually means a transient network blip mid-run.
     mcp_url = (mcp_url or "").strip()
-    read_enabled = bool(mcp_url)
-    mcp_servers: list[tuple[str, dict[str, str]]] = []
-    if read_enabled:
-        if not await _probe_mcp_server(mcp_url, mcp_headers, "mcp (T1)", gha_log):
-            return "", "mcp-connect-failed", []
-        mcp_servers.append((mcp_url, mcp_headers))
-    actions_enabled = False
-    web_enabled = False
-    if mcp_actions_url and mcp_actions_headers:
-        if await _probe_mcp_server(
-            mcp_actions_url, mcp_actions_headers, "mcp-actions (T1)", gha_log,
-        ):
-            mcp_servers.append((mcp_actions_url, mcp_actions_headers))
-            actions_enabled = True
-    if web_fetch_url:
-        if await _probe_mcp_server(
-            web_fetch_url, web_fetch_headers or {}, "web-fetch-gate (T1)", gha_log,
-        ):
-            mcp_servers.append((web_fetch_url, web_fetch_headers or {}))
-            web_enabled = True
+
+    from cora.core.mcp_sessions import compose_mcp_sessions, open_mcp_sessions
+
+    configured_sessions = compose_mcp_sessions(
+        mcp_url=mcp_url,
+        mcp_headers=mcp_headers,
+        mcp_actions_url=mcp_actions_url,
+        mcp_actions_headers=mcp_actions_headers,
+        web_fetch_url=web_fetch_url,
+        web_fetch_headers=web_fetch_headers,
+        extra_sessions=extra_sessions,
+        log=gha_log,
+    )
+    opened = await open_mcp_sessions(
+        configured_sessions, probe=_probe_mcp_server, log=gha_log, label_suffix=" (T1)"
+    )
+    if opened is None:
+        return "", "mcp-connect-failed", []
+    mcp_servers, sessions_opened = opened
+    read_enabled = "mcp" in sessions_opened
+    actions_enabled = "actions" in sessions_opened
+    web_enabled = "web-fetch" in sessions_opened
+    extra_enabled = bool(set(sessions_opened) - {"mcp", "actions", "web-fetch"})
 
     tools_available = _loaded_tool_names(
         allowed_tools,
         read_enabled=read_enabled,
         actions_enabled=actions_enabled,
         web_enabled=web_enabled,
+        extra_enabled=extra_enabled,
         read_tools=cfg.read_tools if cfg is not None else None,
         local_repo_tools=cfg.local_repo_tools if cfg is not None else None,
         action_tools=cfg.action_tools if cfg is not None else None,
         web_tools=cfg.web_tools if cfg is not None else None,
+        extra_tools=cfg.extra_tools if cfg is not None else None,
     )
 
     mcp_allowed_for_filter = allowed_tools - {"grep_repo", "git_show"}

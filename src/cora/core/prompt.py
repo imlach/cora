@@ -58,6 +58,18 @@ def assemble_initial_user_prompt(
     ci_context: str | None = None,
     classifier_rationale: str | None = None,
     broaden_tools: bool = False,
+    # Whether a fetch-capable session is actually configured this run
+    # (`WEB_FETCH_GATE_URL`, or an `MCP_SERVERS` entry named
+    # "web-fetch" — see `cora.core.mcp_sessions.resolve_web_fetch_url`).
+    # Gates the ONE tool name this prompt otherwise hardcodes
+    # (`web_fetch_doc`) — default False so a caller that doesn't pass it
+    # gets the safe behaviour (no unclaimed-tool advertisement) rather
+    # than the old unconditional mention. This is a config-time signal,
+    # not a probe result: the initial prompt is assembled before any
+    # MCP session opens, so a configured-but-unreachable fetch session
+    # still gets mentioned here (dropped from the loaded palette later,
+    # same as any other optional MCP server that fails its probe).
+    fetch_tool_configured: bool = False,
 ) -> str:
     parts: list[str] = [
         f"# PR #{metadata.get('number', '?')}: {metadata.get('title', '')}",
@@ -150,6 +162,22 @@ def assemble_initial_user_prompt(
         # framing now pairs "validate every claim" with "each lookup
         # targeted, no repeats, stop when verified". `broaden_tools`
         # is accepted as a no-op for env compat.
+        # The ONE tool this framing used to name unconditionally
+        # (`web_fetch_doc`) — gated on whether a fetch-capable session is
+        # actually configured this run (see `fetch_tool_configured`'s
+        # docstring above), and kept generic rather than the literal name:
+        # the static system prompt (`prompts/deep.md`) already describes
+        # optional tools by what they DO, not by a name a deployment could
+        # rename or replace — stay consistent with that instead of
+        # re-introducing the same "assume a specific tool exists" problem
+        # this parameter exists to fix.
+        fetch_clause = (
+            "; this run has a fetch tool for upstream docs — for a "
+            "dependency bump, use it to pull the release notes before "
+            "trusting memory of the package"
+            if fetch_tool_configured
+            else ""
+        )
         parts += [
             "",
             "## Your task",
@@ -163,9 +191,8 @@ def assemble_initial_user_prompt(
             "those doc tools search an index built from the base branch, "
             "so a file this PR adds won't appear there: verify "
             "PR-added or PR-referenced files via the diff or `git_show`, "
-            "never flag one as missing on a docs-tool miss alone; for a "
-            "dependency bump, pull the upstream facts with "
-            "`web_fetch_doc`. A claim you did not validate with a tool "
+            "never flag one as missing on a docs-tool miss alone"
+            f"{fetch_clause}. A claim you did not validate with a tool "
             "call or a quoted hunk does not go in the review. Your "
             "context window is the budget: keep each lookup targeted "
             "(tight globs, small size bounds, no whole-directory "

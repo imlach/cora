@@ -32,11 +32,30 @@ def test_default_grounds_every_claim():
     p = _prompt()
     assert "validate ANY claim" in p
     assert "Aim for ≤2 tool calls" not in p
-    # encourages the underused knowledge / web tools by name
-    for tool in ("read_decision", "search_cluster_docs", "web_fetch_doc"):
+    # encourages the underused knowledge tools by name — always
+    # available (the read-tools MCP session, when configured).
+    for tool in ("read_decision", "search_cluster_docs"):
         assert tool in p
     # still nudges parallel batching to bound wall-time
     assert "parallel tool calls" in p
+
+
+def test_fetch_tool_mentioned_only_when_configured():
+    """`web_fetch_doc` used to be named unconditionally, even for a
+    deployment with no fetch session at all — claiming a tool that isn't
+    there. `fetch_tool_configured` gates the (now tool-name-agnostic)
+    mention on whether a fetch session is actually configured this run."""
+    configured = _prompt(fetch_tool_configured=True)
+    assert "fetch tool" in configured
+    assert "dependency bump" in configured
+    # Generic wording, not the literal tool name — a deployment could
+    # rename or replace it; the static system prompt already avoids
+    # naming optional tools, this framing stays consistent with that.
+    assert "web_fetch_doc" not in configured
+
+    unconfigured = _prompt()
+    assert "fetch tool" not in unconfigured
+    assert "web_fetch_doc" not in unconfigured
 
 
 def test_grounding_carries_the_context_budget_counterweight():

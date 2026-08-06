@@ -9,6 +9,28 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 ## [Unreleased]
 
 ### Added
+- **Generic extra MCP sessions** (`MCP_SERVERS`, a JSON array of
+  `{"name", "url", "token_env", "required"}` objects) — a deployment
+  wiring a fourth (fifth, …) MCP server no longer needs a new named env
+  var. `token_env` is env-var indirection (the JSON never carries a
+  literal token); a `token_env` that doesn't resolve connects tokenless
+  with a warning rather than failing config parse. Internally, the three
+  named slots (`MCP_URL`/`MCP_TOKEN`, `MCP_ACTIONS_URL`/`MCP_ACTIONS_TOKEN`,
+  `WEB_FETCH_GATE_URL`) now normalize into the SAME session list as
+  `MCP_SERVERS` entries — every dispatch site (`deep_review_call`,
+  `continue_on_t1`, `call_t2_alt_reviewer`) probes/opens through one
+  shared loop (`cora.core.mcp_sessions`) instead of three duplicated
+  branches, preserving the required-vs-optional fail-soft distinction
+  exactly. `AGENT_REVIEW_EXTRA_TOOLS` (CSV) admits an extra session's
+  tool names through the MCP allow-set filter — local tool names still
+  win any collision. The release-notes pre-fetch resolves its endpoint
+  as explicit `WEB_FETCH_GATE_URL`, else the first `MCP_SERVERS` entry
+  named `"web-fetch"` — a name convention, since the prefetch runs
+  before any session opens. The initial prompt's "pull the upstream
+  facts with `web_fetch_doc`" line — previously shown unconditionally,
+  even with no fetch session configured — now only appears (in generic
+  "a fetch tool for upstream docs" wording, not a hardcoded tool name)
+  when one actually is.
 - **Per-result char cap on the in-process repo tools**
   (`TOOL_RESULT_CHAR_CAP`, env `AGENT_REVIEW_TOOL_RESULT_CHAR_CAP`,
   default 16 000 chars). `git_show` file content is head+tail truncated

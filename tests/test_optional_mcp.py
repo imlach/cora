@@ -236,3 +236,92 @@ def test_t1_does_not_probe_an_unconfigured_server(monkeypatch):
     assert reason is None
     assert body == "Verdict: looks good\n\nbody"
     assert set(c.LOCAL_REPO_TOOLS) <= set(tools)
+
+
+# ── extra_sessions (MCP_SERVERS) end-to-end wiring ─────────────────────
+
+
+def test_deep_review_call_probes_extra_sessions_and_admits_their_tools(monkeypatch):
+    """An `extra_sessions` entry (what `ReviewerConfig.mcp_servers` /
+    `MCP_SERVERS` normalizes into) must be probed alongside the legacy
+    slots and, once opened, count toward the loaded tool palette when
+    its name is in `cfg.extra_tools` — the CSV allow-set extension."""
+    from cora.core.mcp_sessions import McpServerSpec
+
+    probed_names: list = []
+
+    async def _probe(url, headers, name, log):
+        probed_names.append(name)
+        return True
+
+    _wire(monkeypatch, probe=_probe)
+
+    from cora.core.budget import Budget
+    from cora.core.deep_review import deep_review_call
+
+    cfg = ReviewerConfig(extra_tools=frozenset({"custom_tool"}))
+    _body, reason, tools, _messages = asyncio.run(
+        deep_review_call(
+            endpoint_base_url="https://llm.example/v1",
+            llm_gateway_key="key",
+            model_alias="review",
+            system_prompt="system",
+            initial_user_prompt="prompt",
+            budget=Budget(max_input=0, max_output=0, max_iterations=4),
+            timeout_s=30,
+            pr_number="42",
+            repo="o/r",
+            mcp_url="",
+            mcp_headers={},
+            extra_sessions=[
+                McpServerSpec(name="docs2", url="https://docs2.example/mcp")
+            ],
+            allowed_tools=set(c.LOCAL_REPO_TOOLS) | {"custom_tool"},
+            gha_log=print,
+            cfg=cfg,
+        )
+    )
+    assert reason is None
+    assert "docs2" in probed_names
+    assert "custom_tool" in tools
+
+
+def test_deep_review_call_required_extra_session_failure_fails_the_review(monkeypatch):
+    """`required: true` on an extra session mirrors `MCP_URL`'s
+    contract — an unreachable one fails the whole review, not just
+    that session."""
+    from cora.core.mcp_sessions import McpServerSpec
+
+    async def _probe(url, headers, name, log):
+        return False
+
+    _wire(monkeypatch, probe=_probe)
+
+    from cora.core.budget import Budget
+    from cora.core.deep_review import deep_review_call
+
+    body, reason, _tools, _messages = asyncio.run(
+        deep_review_call(
+            endpoint_base_url="https://llm.example/v1",
+            llm_gateway_key="key",
+            model_alias="review",
+            system_prompt="system",
+            initial_user_prompt="prompt",
+            budget=Budget(max_input=0, max_output=0, max_iterations=4),
+            timeout_s=30,
+            pr_number="42",
+            repo="o/r",
+            mcp_url="",
+            mcp_headers={},
+            extra_sessions=[
+                McpServerSpec(
+                    name="docs2", url="https://docs2.example/mcp", required=True
+                )
+            ],
+            allowed_tools=set(c.LOCAL_REPO_TOOLS),
+            gha_log=print,
+            cfg=ReviewerConfig(),
+        )
+    )
+    assert body == ""
+    assert reason == "mcp-connect-failed"

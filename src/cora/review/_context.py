@@ -195,6 +195,16 @@ async def assemble_context(run: ReviewRun) -> ReviewResult | None:
     # Release-notes pre-fetch for dep-bump PRs (`deps` label): extract the
     # upstream release/compare URL from the body and fetch it server-side
     # through the web-fetch gate. Soft-fail across the board.
+    # Endpoint resolution shared by the prefetch below and the initial
+    # prompt's "a fetch tool is available" advertisement: explicit
+    # `WEB_FETCH_GATE_URL` wins, else the first `MCP_SERVERS` entry
+    # declared `name: "web-fetch"`. Config-time, not probe-time — the
+    # prefetch needs the URL before any MCP session opens (it makes its
+    # own short-lived session), so there's nothing to introspect yet.
+    from cora.core.mcp_sessions import resolve_web_fetch_url
+
+    web_fetch_url = resolve_web_fetch_url(cfg)
+
     if run.deps_labelled:
         from cora.core.prefetch import (
             extract_release_url,
@@ -202,7 +212,6 @@ async def assemble_context(run: ReviewRun) -> ReviewResult | None:
             format_release_notes_block,
         )
 
-        web_fetch_url = (cfg.web_fetch_gate_url or "").strip()
         candidate_url = extract_release_url(metadata.get("body") or "")
         if web_fetch_url and candidate_url:
             try:
@@ -225,7 +234,11 @@ async def assemble_context(run: ReviewRun) -> ReviewResult | None:
                     f"status=transport-error"
                 )
         elif candidate_url and not web_fetch_url:
-            _gha_log("release-notes prefetch skipped: WEB_FETCH_GATE_URL unset")
+            _gha_log(
+                "release-notes prefetch skipped: no web-fetch endpoint "
+                "configured (WEB_FETCH_GATE_URL / an MCP_SERVERS "
+                "'web-fetch' entry)"
+            )
         elif web_fetch_url and not candidate_url:
             _gha_log(
                 "release-notes prefetch skipped: no GitHub release URL in PR body"
@@ -246,6 +259,7 @@ async def assemble_context(run: ReviewRun) -> ReviewResult | None:
         classifier_rationale=classifier_rationale,
         # Teacher-trajectory mode — opt-in, never the live default.
         broaden_tools=cfg.broaden_tools,
+        fetch_tool_configured=bool(web_fetch_url),
     )
     _gha_log(
         f"initial user prompt: {len(run.initial_user_prompt)} chars "

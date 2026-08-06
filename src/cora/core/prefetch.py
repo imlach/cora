@@ -112,11 +112,15 @@ async def fetch_release_notes(
     grain for the agent's prompt budget (~3K tokens at the cap).
 
     `cfg` supplies the gate URL when the caller passes an empty
-    `web_fetch_url` (`cfg.web_fetch_gate_url`); no URL from either
+    `web_fetch_url` — `cfg.web_fetch_gate_url`, or the first
+    `MCP_SERVERS` entry named `"web-fetch"` (see
+    `cora.core.mcp_sessions.resolve_web_fetch_url`); no URL from either
     source keeps the existing no-prefetch soft-fail.
     """
     if not web_fetch_url and cfg is not None:
-        web_fetch_url = cfg.web_fetch_gate_url or ""
+        from cora.core.mcp_sessions import resolve_web_fetch_url
+
+        web_fetch_url = resolve_web_fetch_url(cfg)
     if not web_fetch_url or not release_url:
         return None
 
