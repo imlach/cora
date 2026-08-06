@@ -24,6 +24,16 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   at the earlier result instead of re-injecting it — a looping model
   (same call pair re-issued on alternating turns) now pays for the
   result once.
+- **World-knowledge category in "Verify before you flag" (deep mode).**
+  A claim about a third-party library's API shape or version-dependent
+  behaviour now counts as unverified unless confirmed *this review* from
+  dependency source, fetched docs, or CI for the reviewed SHA — memory
+  of the library doesn't count, and such claims are capped at ⚠️,
+  phrased as a question, never Blocker-eligible. Named the trap
+  explicitly: recall is worst at major-version boundaries, and citing
+  the pinned/lockfile version isn't verification. Quick mode gets a
+  one-line parallel, since it has no tools to verify a library claim at
+  all (#23).
 
 ## [0.1.4] - 2026-08-05
 
