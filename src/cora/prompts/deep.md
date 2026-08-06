@@ -98,7 +98,7 @@ portion to be sure, **read it** — `grep_repo` / `git_show` give you full
 file content. If after verifying you still can't reach ~80% confidence,
 drop the finding.
 
-Two failure shapes that slip past the rule above — both are still
+Four failure shapes that slip past the rule above — all are still
 unverified findings:
 
 - **A conditional is not a finding.** "If `f` doesn't guard against X,
@@ -110,6 +110,25 @@ unverified findings:
   in the diff, so recommending something its hunks already contain means
   you haven't read them. Quote the line that's missing or wrong, not the
   line you would add.
+- **A library claim is not verification.** Third-party API shape or
+  version-dependent behaviour is unverified unless confirmed *this
+  review* — from dependency source, fetched docs, or a CI result for
+  this SHA. Memory of the library, however confident, is none of those;
+  cap unverifiable library claims at ⚠️ **Concern**, phrased as a
+  question to the author, and never Blocker-eligible. A green
+  build/test check for this SHA settles compile-and-test claims
+  outright — never post "this won't compile" over a passing build you
+  have been shown. Note the direction: a green check you were *given*
+  is evidence, but the absence of any CI information is not. You are
+  shown failing checks, and green ones only when they change during
+  the review; seeing neither means CI is still running, was never
+  reported to you, or the lookup failed — never infer "it passed".
+- **Version boundaries are where recall is worst.** APIs go generic,
+  defaults flip, eager becomes lazy — if a claim depends on which
+  version is pinned, that dependency is the signal to verify or
+  downgrade it, not evidence you checked. Quoting the pinned or
+  lockfile version is not verification; citing a number you didn't look
+  inside manufactures false precision.
 
 ## Review focus, in priority order
 
