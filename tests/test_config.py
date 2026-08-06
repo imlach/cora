@@ -62,6 +62,11 @@ def test_defaults_mirror_engine_constants():
         d.spiral_recovery_reasoning_char_cap
         == c.SPIRAL_RECOVERY_REASONING_CHAR_CAP
     )
+    # Dependency-source corpus (grep_repo corpus="deps", cora #23) —
+    # empty/unset self-disarms, same convention as MCP_URL.
+    assert d.dep_source_roots == c.DEFAULT_DEP_SOURCE_ROOTS
+    assert d.dep_source_roots == ()
+    assert d.dep_source_max_files_scanned == c.DEP_SOURCE_MAX_FILES_SCANNED
 
 
 def test_from_env_respects_injected_mapping():
@@ -375,3 +380,29 @@ def test_from_env_parses_extra_tools_csv():
     )
     assert fe.extra_tools == frozenset({"custom_tool_a", "custom_tool_b"})
     assert ReviewerConfig.from_env({}).extra_tools == frozenset()
+# ── Dependency-source corpus (grep_repo corpus="deps", cora #23) ──────
+
+
+def test_from_env_parses_dep_source_roots_csv():
+    fe = ReviewerConfig.from_env(
+        {"DEP_SOURCE_ROOTS": "/opt/gomodcache, /repo/vendor ,/repo/node_modules"}
+    )
+    assert fe.dep_source_roots == (
+        "/opt/gomodcache",
+        "/repo/vendor",
+        "/repo/node_modules",
+    )
+
+
+def test_from_env_dep_source_roots_unset_stays_empty():
+    assert ReviewerConfig.from_env({}).dep_source_roots == ()
+    assert ReviewerConfig.from_env({"DEP_SOURCE_ROOTS": ""}).dep_source_roots == ()
+
+
+def test_from_env_parses_dep_source_max_files_scanned():
+    fe = ReviewerConfig.from_env({"DEP_SOURCE_MAX_FILES_SCANNED": "1234"})
+    assert fe.dep_source_max_files_scanned == 1234
+    assert (
+        ReviewerConfig.from_env({}).dep_source_max_files_scanned
+        == c.DEP_SOURCE_MAX_FILES_SCANNED
+    )

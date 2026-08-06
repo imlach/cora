@@ -470,6 +470,47 @@ TOOL_RESULT_CHAR_CAP = int(
     os.environ.get("AGENT_REVIEW_TOOL_RESULT_CHAR_CAP", "16000")
 )
 
+# ── Dependency-source corpus — grep_repo's second corpus (cora #23) ───
+# A library-API claim ("this function takes three args", "that field
+# doesn't exist on the response type") is usually asserted from
+# training-data memory, because the only corpus `grep_repo` searches is
+# the PR checkout — the actual pinned dependency source (a Go module
+# cache, a vendor dir, node_modules, a site-packages tree) is
+# structurally unreachable. `DEP_SOURCE_ROOTS` names where a
+# deployment's CI runner has already materialized that source; cora
+# never resolves or fetches dependencies itself, it only greps what's
+# already on disk.
+#
+# Empty/unset is SELF-DISARMING, the same convention as
+# `DEFAULT_MCP_URL`: no roots configured means the corpus simply doesn't
+# exist, and `grep_repo(corpus="deps")` says so in one line instead of
+# erroring — the model should learn "absent", not retry.
+DEFAULT_DEP_SOURCE_ROOTS: tuple[str, ...] = ()
+
+# In-repo vendored trees auto-detected directly under the checkout root
+# when `DEP_SOURCE_ROOTS` is unset: `vendor/` (Go/PHP/Ruby convention)
+# and `node_modules/` (npm/yarn/pnpm). A repo that vendors its
+# dependencies already has the corpus checked out — no extra config
+# should be required to grep it. Only consulted when DEP_SOURCE_ROOTS is
+# unset; an explicit list is never second-guessed.
+DEP_SOURCE_AUTO_DIRS: tuple[str, ...] = ("vendor", "node_modules")
+
+# Deps-corpus walk ceiling. A populated Go module cache or a deep
+# node_modules can run into the hundreds of MB — far past what a repo
+# checkout costs to walk — so the deps corpus bounds total files
+# *touched* by `os.walk`, independent of `_GREP_HARD_MAX_COUNT` (which
+# only bounds files that MATCHED, not files visited). Hitting it
+# truncates the walk with an explicit note rather than silently
+# stopping partway through — a truncated-but-unlabelled scan is the
+# failure mode to avoid, since the model would read a clean "no
+# matches" as exhaustive. Tens of thousands by default: generous for a
+# single vendored tree or module cache, still finite against a
+# multi-language monorepo's combined corpus. Env-tunable because "how
+# big is your corpus" is a deployment fact, not an engine constant.
+DEP_SOURCE_MAX_FILES_SCANNED = int(
+    os.environ.get("DEP_SOURCE_MAX_FILES_SCANNED", "50000")
+)
+
 # Whitelist of MCP-server tools exposed to the agent for PR review.
 # Live-infrastructure tools (kubectl_*, loki_query, prometheus_query,
 # pods_top, nodes_top) are excluded — reviewing a static diff doesn't

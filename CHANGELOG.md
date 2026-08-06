@@ -64,6 +64,24 @@ versions (e.g. `0.0.0.dev60+g257737d`).
     in the body) so a human reads the annotated findings before merge.
     Soft-fails on any API error (posts the review unchanged);
     killswitch `AGENT_REVIEW_CI_VERDICT_GATE` (default-true).
+- **`grep_repo` gained a second, explicitly-labelled corpus:
+  `corpus="deps"`** (#23). Library-API claims ("this function takes
+  three args") were previously asserted from the model's training-data
+  memory, because the only corpus `grep_repo` searched was the PR
+  checkout — the actual pinned dependency source (a Go module cache, a
+  vendor dir, `node_modules`, a `site-packages` tree) was structurally
+  unreachable, and a stale-memory claim landed as a false 🚨 Blocker.
+  `DEP_SOURCE_ROOTS` (CSV of absolute paths a deployment's CI runner has
+  already materialized) configures the new corpus; empty/unset
+  self-disarms unless in-repo `vendor/`/`node_modules/` are
+  auto-detected under the checkout root. Results are labelled by which
+  root matched and carry `"corpus": "deps"`, so provenance is never
+  ambiguous with a repo-corpus result. Bounded by a new
+  `DEP_SOURCE_MAX_FILES_SCANNED` walk cap (default 50 000) independent
+  of the existing match-count cap, since a dependency tree can run into
+  the hundreds of MB where a repo checkout does not; hitting either cap
+  truncates with an explicit note. `corpus="repo"` (the default) is
+  unchanged. See `docs/configuration.md` for the full knob table.
 - **Per-result char cap on the in-process repo tools**
   (`TOOL_RESULT_CHAR_CAP`, env `AGENT_REVIEW_TOOL_RESULT_CHAR_CAP`,
   default 16 000 chars). `git_show` file content is head+tail truncated

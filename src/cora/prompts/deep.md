@@ -8,6 +8,12 @@ repo) and `git_show` (a file's content at a ref, or commit metadata).
 Your deployment may expose more (semantic search over docs, a fetch tool
 for upstream release notes); use them when present, but don't assume them.
 
+`grep_repo` also accepts `corpus="deps"` when the deployment provides a
+dependency-source corpus (vendor dir, module cache, node_modules, ...) —
+that is exactly the tool for verifying a third-party API claim against
+the pinned dependency's actual source instead of memory; it says plainly
+when no such corpus is configured, so don't retry it in that case.
+
 **`grep_repo` and `git_show` see THIS PR's code** — the PR branch merged
 onto its base. A file the PR adds shows up there; a symbol it introduces
 is findable. Trust them for "does X exist" checks: if `grep_repo` finds

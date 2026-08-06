@@ -120,3 +120,212 @@ def test_deep_review_local_tools_route_through_injected_provider():
     assert asyncio.run(by["git_show"].function(ref="HEAD", path="f.py")) == "SHOW_OUT"
     assert spy.calls[0][0] == "grep" and spy.calls[0][1]["pattern"] == "x"
     assert ("show", {"ref": "HEAD", "path": "f.py"}) in spy.calls
+
+
+# ── grep_repo(corpus="deps") dispatch on LocalGitProvider ─────────────
+
+
+def test_local_git_provider_grep_repo_defaults_to_repo_corpus(tmp_path: Path):
+    (tmp_path / "a.py").write_text("NEEDLE\n", encoding="utf-8")
+    out = json.loads(LocalGitProvider(repo_root=tmp_path).grep_repo({"pattern": "NEEDLE"}))
+    assert out["match_count"] == 1
+    assert "corpus" not in out  # unchanged repo-corpus envelope
+
+
+def test_local_git_provider_grep_repo_corpus_deps_dispatches(tmp_path: Path):
+    dep_root = tmp_path / "vendor"
+    dep_root.mkdir()
+    (dep_root / "lib.go").write_text("func Public() { NEEDLE }\n", encoding="utf-8")
+
+    provider = LocalGitProvider(repo_root=tmp_path, dep_source_roots=[dep_root])
+    out = json.loads(provider.grep_repo({"pattern": "NEEDLE", "corpus": "deps"}))
+    assert out["corpus"] == "deps"
+    assert out["match_count"] == 1
+    assert out["matches"][0]["path"] == "vendor/lib.go"
+
+
+def test_local_git_provider_grep_repo_deps_corpus_absent_by_default(tmp_path: Path):
+    """A `LocalGitProvider` built without `dep_source_roots` (the common
+    case in direct construction / tests) has no deps corpus — it does
+    NOT silently fall back to scanning `repo_root`."""
+    out = LocalGitProvider(repo_root=tmp_path).grep_repo(
+        {"pattern": "NEEDLE", "corpus": "deps"}
+    )
+    assert "no dependency-source corpus" in out
+
+
+def test_local_git_provider_grep_repo_unknown_corpus_errors(tmp_path: Path):
+    out = LocalGitProvider(repo_root=tmp_path).grep_repo(
+        {"pattern": "NEEDLE", "corpus": "bogus"}
+    )
+    assert out == "ERROR: grep_repo: corpus must be 'repo' or 'deps' (got 'bogus')"
+
+
+# ── _resolve_dep_source_roots — config → provider seam ─────────────────
+
+
+def test_resolve_dep_source_roots_keeps_existing_explicit_paths(tmp_path: Path):
+    from cora.providers.git import _resolve_dep_source_roots
+
+    root_a = tmp_path / "a"
+    root_a.mkdir()
+    cfg = ReviewerConfig(dep_source_roots=(str(root_a),))
+    resolved = _resolve_dep_source_roots(cfg, repo_root=tmp_path)
+    assert resolved == [root_a]
+
+
+def test_resolve_dep_source_roots_drops_missing_with_warning(tmp_path: Path, capsys):
+    from cora.providers.git import _resolve_dep_source_roots
+
+    missing = tmp_path / "does-not-exist"
+    cfg = ReviewerConfig(dep_source_roots=(str(missing),))
+    resolved = _resolve_dep_source_roots(cfg, repo_root=tmp_path)
+    assert resolved == []
+    out = capsys.readouterr().out
+    assert "::warning::" in out
+    assert str(missing) in out
+
+
+def test_resolve_dep_source_roots_partial_drop_keeps_the_rest(tmp_path: Path):
+    from cora.providers.git import _resolve_dep_source_roots
+
+    present = tmp_path / "present"
+    present.mkdir()
+    missing = tmp_path / "missing"
+    cfg = ReviewerConfig(dep_source_roots=(str(present), str(missing)))
+    resolved = _resolve_dep_source_roots(cfg, repo_root=tmp_path)
+    assert resolved == [present]
+
+
+def test_resolve_dep_source_roots_auto_detects_in_repo_vendor_and_node_modules(
+    tmp_path: Path,
+):
+    from cora.providers.git import _resolve_dep_source_roots
+
+    (tmp_path / "vendor").mkdir()
+    (tmp_path / "node_modules").mkdir()
+    cfg = ReviewerConfig()  # dep_source_roots unset
+    resolved = _resolve_dep_source_roots(cfg, repo_root=tmp_path)
+    assert set(resolved) == {tmp_path / "vendor", tmp_path / "node_modules"}
+
+
+def test_resolve_dep_source_roots_auto_detect_only_what_exists(tmp_path: Path):
+    from cora.providers.git import _resolve_dep_source_roots
+
+    (tmp_path / "vendor").mkdir()
+    cfg = ReviewerConfig()
+    resolved = _resolve_dep_source_roots(cfg, repo_root=tmp_path)
+    assert resolved == [tmp_path / "vendor"]
+
+
+def test_resolve_dep_source_roots_no_autodetect_and_no_config_is_empty(tmp_path: Path):
+    from cora.providers.git import _resolve_dep_source_roots
+
+    cfg = ReviewerConfig()
+    resolved = _resolve_dep_source_roots(cfg, repo_root=tmp_path)
+    assert resolved == []
+
+
+def test_resolve_dep_source_roots_explicit_wins_over_autodetect(tmp_path: Path):
+    """An explicit DEP_SOURCE_ROOTS list is never second-guessed by
+    auto-detection — even when the repo also happens to vendor deps."""
+    from cora.providers.git import _resolve_dep_source_roots
+
+    (tmp_path / "vendor").mkdir()
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    cfg = ReviewerConfig(dep_source_roots=(str(other),))
+    resolved = _resolve_dep_source_roots(cfg, repo_root=tmp_path)
+    assert resolved == [other]
+
+
+def test_from_config_wires_resolved_dep_source_roots_into_provider(tmp_path: Path):
+    (tmp_path / "vendor").mkdir()
+    (tmp_path / "vendor" / "lib.go").write_text("NEEDLE\n", encoding="utf-8")
+    cfg = ReviewerConfig()
+
+    import cora.core.config as _c
+
+    old_root = _c.REPO_ROOT
+    try:
+        _c.REPO_ROOT = tmp_path
+        provider = GitProvider.from_config(cfg)
+        assert isinstance(provider, LocalGitProvider)
+        assert provider.dep_source_roots == [tmp_path / "vendor"]
+        out = json.loads(provider.grep_repo({"pattern": "NEEDLE", "corpus": "deps"}))
+        assert out["match_count"] == 1
+    finally:
+        _c.REPO_ROOT = old_root
+
+
+def test_from_config_wires_dep_source_max_files_scanned(tmp_path: Path):
+    cfg = ReviewerConfig(dep_source_max_files_scanned=7)
+    provider = GitProvider.from_config(cfg)
+    assert provider.dep_source_max_files_scanned == 7
+
+
+# ── auto-detected roots are PR-controlled — containment ────────────────
+# The checkout is the reviewed PR's merge ref, so `vendor/` and
+# `node_modules/` are paths the PR author writes. `Path.is_dir()` follows
+# symlinks and `os.walk` descends its top-level argument regardless of
+# `followlinks`, so without a containment check a PR adding `vendor -> /`
+# turns the deps corpus into a runner-filesystem grep whose hits are
+# quoted into a public verdict comment.
+
+
+def test_auto_detected_root_that_is_a_symlink_is_refused(tmp_path: Path):
+    from cora.providers.git import _resolve_dep_source_roots
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "creds.env").write_text("TOKEN=sentinel\n", encoding="utf-8")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "vendor").symlink_to(outside, target_is_directory=True)
+
+    cfg = ReviewerConfig()
+    assert _resolve_dep_source_roots(cfg, repo_root=repo) == []
+
+
+def test_auto_detected_symlink_escape_greps_nothing(tmp_path: Path):
+    """End-to-end: the sentinel must not come back through the tool."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "creds.env").write_text("TOKEN=sentinel\n", encoding="utf-8")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "node_modules").symlink_to(outside, target_is_directory=True)
+
+    from cora.providers.git import _resolve_dep_source_roots
+
+    roots = _resolve_dep_source_roots(ReviewerConfig(), repo_root=repo)
+    out = LocalGitProvider(repo_root=repo, dep_source_roots=roots).grep_repo(
+        {"pattern": "sentinel", "corpus": "deps"}
+    )
+    assert "sentinel" not in out
+
+
+def test_real_auto_detected_directory_is_still_used(tmp_path: Path):
+    """The guard must not disarm the feature for a genuine vendor dir."""
+    from cora.providers.git import _resolve_dep_source_roots
+
+    repo = tmp_path / "repo"
+    (repo / "vendor" / "pkg").mkdir(parents=True)
+    (repo / "vendor" / "pkg" / "api.go").write_text(
+        "func NewClient() {}\n", encoding="utf-8"
+    )
+    resolved = _resolve_dep_source_roots(ReviewerConfig(), repo_root=repo)
+    assert resolved == [repo / "vendor"]
+
+
+def test_explicit_roots_are_not_second_guessed(tmp_path: Path):
+    """An operator-set DEP_SOURCE_ROOTS entry is deployment config, not
+    PR-controlled — a symlinked module cache stays legitimate."""
+    from cora.providers.git import _resolve_dep_source_roots
+
+    real = tmp_path / "real-cache"
+    real.mkdir()
+    link = tmp_path / "gomodcache"
+    link.symlink_to(real, target_is_directory=True)
+    cfg = ReviewerConfig(dep_source_roots=(str(link),))
+    assert _resolve_dep_source_roots(cfg, repo_root=tmp_path) == [link]

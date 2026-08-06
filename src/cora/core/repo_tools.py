@@ -6,10 +6,21 @@ they go PR-blind on files the PR adds. Serving these locally from
 the PR merge ref means existence checks reflect the code actually
 under review.
 
-Both handlers take a single `args: dict` for parity with the
-MCP-server call shape; `deep_review._make_pydantic_ai_local_tools`
-wraps them as typed `pydantic_ai.Tool` instances (schema inferred
-from the wrapper's type hints).
+`grep_repo` searches two corpora: `local_grep_repo` (the PR checkout,
+`corpus="repo"`, the default) and `local_grep_deps` (the deployment's
+resolved dependency source — a Go module cache, vendor dir,
+node_modules, site-packages, ..., `corpus="deps"`) — added so a
+library-API claim can be checked against the pinned dependency's
+actual source instead of asserted from memory (cora issue #23). They
+share validation (`_parse_grep_query`) and per-entry match building,
+but walk separately: the repo corpus has exactly one root and skips
+`node_modules`/`.venv`/`venv` as build noise, while the deps corpus has
+one-or-many roots where those same directories ARE the corpus.
+
+All handlers take a single `args: dict` for parity with the MCP-server
+call shape; `deep_review._make_pydantic_ai_local_tools` wraps them as
+typed `pydantic_ai.Tool` instances (schema inferred from the wrapper's
+type hints).
 """
 
 from __future__ import annotations
@@ -21,7 +32,11 @@ import re
 import subprocess
 from pathlib import Path
 
-from cora.core.config import REPO_ROOT, TOOL_RESULT_CHAR_CAP
+from cora.core.config import (
+    DEP_SOURCE_MAX_FILES_SCANNED,
+    REPO_ROOT,
+    TOOL_RESULT_CHAR_CAP,
+)
 
 
 _GREP_SKIP_DIRS = frozenset(
@@ -30,6 +45,17 @@ _GREP_SKIP_DIRS = frozenset(
         ".agent-venv", ".mypy_cache", ".pytest_cache", ".ruff_cache",
     }
 )
+# Deps-corpus skip dirs — deliberately NOT the same set as
+# `_GREP_SKIP_DIRS`: `node_modules` / `.venv` / `venv` are exactly what
+# a deps-corpus root points at, so excluding them would grep nothing.
+# Only true noise (VCS metadata, tool caches) is skipped.
+_DEP_GREP_SKIP_DIRS = frozenset(
+    {".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache"}
+)
+# Traversal ceiling as a multiple of the candidate-file cap. Bounds a glob
+# that matches almost nothing against a huge corpus; see the two-bounds
+# comment in `local_grep_deps`.
+_DEP_TRAVERSAL_CAP_MULTIPLE = 20
 _GREP_SKIP_EXT = frozenset(
     {
         ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf",
@@ -90,13 +116,31 @@ def _normalize_glob(glob: str, root: Path) -> str:
     return glob
 
 
-def local_grep_repo(args: dict, *, root: Path | None = None) -> str:
-    """grep_repo over the checkout root (the PR merge tree). Python `re`,
-    same output envelope as the MCP server's grep_repo so the agent's
-    learned usage carries over — only the corpus differs (PR branch,
-    not the `main` mirror). `root` defaults to the module-global
-    `REPO_ROOT`; `GitProvider` passes an explicit root."""
-    root = root if root is not None else REPO_ROOT
+def _glob_static_segments(glob: str) -> list[str]:
+    """Leading wildcard-free path segments of a glob.
+
+    `"github.com/pkg/errors/*"` → `["github.com", "pkg", "errors"]`;
+    `"*.go"` → `[]`. Lets the deps walk skip subtrees that cannot contain
+    a match instead of paying for them out of the scan budget — on a
+    module cache the difference is the whole feature working or not.
+    Stops at the first segment carrying a wildcard, so pruning never
+    excludes a directory the glob could still match."""
+    segments: list[str] = []
+    for seg in glob.split("/"):
+        if not seg or any(c in seg for c in "*?["):
+            break
+        segments.append(seg)
+    return segments
+
+
+def _parse_grep_query(args: dict) -> dict | str:
+    """Validate + normalize the args `local_grep_repo` and
+    `local_grep_deps` share (pattern, glob shape, max_count,
+    context_lines). Returns a dict on success or an `ERROR: ...` string
+    to return verbatim from the caller. Glob directory-subtree expansion
+    (`_normalize_glob`) is NOT done here — it needs a specific root, and
+    the deps corpus may have several, so each caller normalizes
+    per-root."""
     pattern = (args.get("pattern") or "").strip()
     if not pattern:
         return "ERROR: grep_repo: pattern is required"
@@ -118,12 +162,34 @@ def local_grep_repo(args: dict, *, root: Path | None = None) -> str:
                 f"ERROR: grep_repo: glob {glob!r} must be repo-relative "
                 "and may not contain '..'"
             )
-        if glob:
-            glob = _normalize_glob(glob, root)
     max_count = max(1, min(int(args.get("max_count") or 50), _GREP_HARD_MAX_COUNT))
     context_lines = max(
         0, min(int(args.get("context_lines") or 0), _GREP_CONTEXT_MAX)
     )
+    return {
+        "pattern": pattern,
+        "rx": rx,
+        "glob": glob,
+        "max_count": max_count,
+        "context_lines": context_lines,
+    }
+
+
+def local_grep_repo(args: dict, *, root: Path | None = None) -> str:
+    """grep_repo over the checkout root (the PR merge tree, `corpus=
+    "repo"`). Python `re`, same output envelope as the MCP server's
+    grep_repo so the agent's learned usage carries over — only the
+    corpus differs (PR branch, not the `main` mirror). `root` defaults
+    to the module-global `REPO_ROOT`; `GitProvider` passes an explicit
+    root. See `local_grep_deps` for the dependency-source corpus."""
+    root = root if root is not None else REPO_ROOT
+    parsed = _parse_grep_query(args)
+    if isinstance(parsed, str):
+        return parsed
+    pattern, rx, glob = parsed["pattern"], parsed["rx"], parsed["glob"]
+    max_count, context_lines = parsed["max_count"], parsed["context_lines"]
+    if glob:
+        glob = _normalize_glob(glob, root)
 
     matches: list[dict] = []
     files_scanned = 0
@@ -214,6 +280,213 @@ def local_grep_repo(args: dict, *, root: Path | None = None) -> str:
         out["note"] = (
             "glob selected zero files — it is fnmatch'd against the full "
             "repo-relative path; use 'dir/*' for a subtree or check the path"
+        )
+    return json.dumps(out, indent=2)
+
+
+def local_grep_deps(
+    args: dict,
+    *,
+    roots: list[Path],
+    max_files_scanned: int | None = None,
+) -> str:
+    """grep_repo over the deployment's resolved dependency-source trees
+    (`corpus="deps"`) — a Go module cache, a vendor dir, node_modules, a
+    site-packages tree, whatever a deployment's CI runner has already
+    materialized. Answers "what is this library's API at the pinned
+    version" from the actual source instead of the model's training-data
+    memory (cora issue #23).
+
+    Differs from `local_grep_repo` in exactly the ways the second corpus
+    needs: potentially several `roots` (each match's `path` is prefixed
+    with which root matched, since roots can share relative paths);
+    `_DEP_GREP_SKIP_DIRS` instead of `_GREP_SKIP_DIRS` (`node_modules` /
+    `.venv` / `venv` are the corpus here, not build noise to skip); and a
+    `max_files_scanned` walk cap, because a dependency tree can run into
+    the hundreds of MB where a repo checkout does not — hitting it
+    truncates with an explicit note rather than a silent partial scan.
+    Same `_GREP_FILE_SIZE_MAX` / `_GREP_HARD_MAX_COUNT` / `_GREP_LINE_MAX`
+    as the repo corpus: a single file worth quoting, or a result worth
+    returning, isn't bigger just because the corpus is.
+
+    `roots` is pre-resolved by the caller (`GitProvider.from_config` via
+    `_resolve_dep_source_roots`: validated to exist, auto-detected from
+    in-repo `vendor/`/`node_modules/` when `DEP_SOURCE_ROOTS` is unset).
+    An empty list means this deployment has no dependency corpus at all
+    — reported as a plain one-line message, not `ERROR:`, so the model
+    learns the corpus is absent instead of retrying the call."""
+    if not roots:
+        return (
+            "no dependency-source corpus configured for this deployment "
+            "(DEP_SOURCE_ROOTS unset, and no vendor/ or node_modules/ "
+            'found under the checkout) — grep_repo(corpus="repo") is the '
+            "only corpus available here"
+        )
+    parsed = _parse_grep_query(args)
+    if isinstance(parsed, str):
+        return parsed
+    pattern, rx, glob = parsed["pattern"], parsed["rx"], parsed["glob"]
+    max_count, context_lines = parsed["max_count"], parsed["context_lines"]
+    cap = (
+        max_files_scanned
+        if max_files_scanned is not None
+        else DEP_SOURCE_MAX_FILES_SCANNED
+    )
+
+    # Two bounds, because they answer different questions. `cap` bounds
+    # how many CANDIDATE files (post-glob) get opened — the useful-work
+    # budget. `traversal_cap` bounds how many directory entries get
+    # looked at at all, so a glob that matches nothing still terminates
+    # on a hundreds-of-thousands-of-files module cache instead of walking
+    # it whole. Generous multiple: the traversal itself is cheap (stat,
+    # no read) next to opening and scanning a file.
+    traversal_cap = cap * _DEP_TRAVERSAL_CAP_MULTIPLE
+    entries_traversed = 0
+    traversal_cap_hit = False
+
+    matches: list[dict] = []
+    files_scanned = 0
+    files_walked = 0
+    files_matched: set[str] = set()
+    truncated = False
+    budget_hit = False
+    scan_cap_hit = False
+    chars_used = 0
+    for root in roots:
+        if truncated:
+            break
+        root_glob = _normalize_glob(glob, root) if glob else None
+        static = _glob_static_segments(root_glob) if root_glob else []
+        for dirpath, dirnames, filenames in os.walk(root):
+            # Sorted so a cap-truncated result is reproducible: os.walk
+            # yields directories in filesystem order, which would make two
+            # reviews of one PR disagree about whether a symbol exists.
+            # Symlinked dirs are dropped — same containment reasoning as
+            # the auto-detected roots (providers/git.py).
+            dirnames[:] = sorted(
+                d for d in dirnames
+                if d not in _DEP_GREP_SKIP_DIRS
+                and not os.path.islink(os.path.join(dirpath, d))
+            )
+            rel_dir = os.path.relpath(dirpath, root)
+            depth = 0 if rel_dir == "." else len(rel_dir.split(os.sep))
+            if depth < len(static):
+                # Still inside the glob's wildcard-free prefix — only the
+                # one named directory can lead to a match.
+                dirnames[:] = [d for d in dirnames if d == static[depth]]
+            if truncated:
+                break
+            for fn in sorted(filenames):
+                if truncated:
+                    break
+                entries_traversed += 1
+                if entries_traversed > traversal_cap:
+                    truncated = True
+                    traversal_cap_hit = True
+                    break
+                if os.path.splitext(fn)[1].lower() in _GREP_SKIP_EXT:
+                    continue
+                abs_path = Path(dirpath) / fn
+                if abs_path.is_symlink():
+                    continue
+                rel_to_root = os.path.relpath(abs_path, root)
+                if root_glob and not fnmatch.fnmatch(rel_to_root, root_glob):
+                    continue
+                # Counted AFTER the glob, not before: a dep tree runs to
+                # hundreds of thousands of files, so a pre-glob cap let
+                # unrelated files eat the whole budget and a precisely
+                # targeted lookup returned zero matches — while the note
+                # advised narrowing the glob, which could not help.
+                files_walked += 1
+                if files_walked > cap:
+                    truncated = True
+                    scan_cap_hit = True
+                    break
+                try:
+                    if abs_path.stat().st_size > _GREP_FILE_SIZE_MAX:
+                        continue
+                except OSError:
+                    continue
+                if _is_binary(abs_path):
+                    continue
+                files_scanned += 1
+                try:
+                    lines = abs_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    ).splitlines()
+                except OSError:
+                    continue
+                # Label with the matched root's directory name — the
+                # deps corpus can have several roots, so a bare
+                # root-relative path is ambiguous about provenance.
+                rel_path = f"{root.name}/{rel_to_root}"
+                for i, line in enumerate(lines):
+                    if not rx.search(line):
+                        continue
+                    entry: dict = {
+                        "path": rel_path,
+                        "line": i + 1,
+                        "content": (
+                            line
+                            if len(line) <= _GREP_LINE_MAX
+                            else line[:_GREP_LINE_MAX] + " …(truncated)"
+                        ),
+                    }
+                    if context_lines:
+                        entry["before"] = lines[max(0, i - context_lines):i]
+                        entry["after"] = lines[i + 1:i + 1 + context_lines]
+                    chars_used += len(entry["content"]) + len(rel_path) + 40
+                    if context_lines:
+                        chars_used += sum(
+                            len(s) for s in entry["before"] + entry["after"]
+                        )
+                    if matches and chars_used > TOOL_RESULT_CHAR_CAP:
+                        truncated = True
+                        budget_hit = True
+                        break
+                    matches.append(entry)
+                    files_matched.add(rel_path)
+                    if len(matches) >= max_count:
+                        truncated = True
+                        break
+
+    out = {
+        "pattern": pattern,
+        "glob": glob,
+        "corpus": "deps",
+        "roots": [str(r) for r in roots],
+        "matches": matches,
+        "match_count": len(matches),
+        "truncated": truncated,
+        "files_scanned": files_scanned,
+        "files_matched": len(files_matched),
+    }
+    if scan_cap_hit:
+        out["note"] = (
+            f"dependency-corpus scan cap ({cap} candidate files) reached "
+            f"— {files_scanned} files searched, {len(matches)} matches; "
+            "narrow with a tighter glob or pattern, or scope "
+            "DEP_SOURCE_ROOTS to search more of the corpus"
+        )
+    elif traversal_cap_hit:
+        out["note"] = (
+            f"dependency-corpus traversal ceiling ({traversal_cap} "
+            f"entries) reached before the glob selected {cap} files — "
+            "the corpus is large and this glob matches little of it; "
+            "anchor the glob at the package subtree you mean "
+            "(e.g. 'pkgname/*'), or scope DEP_SOURCE_ROOTS"
+        )
+    elif budget_hit:
+        out["note"] = (
+            f"result char budget ({TOOL_RESULT_CHAR_CAP}) reached at "
+            f"{len(matches)} matches — narrow with a tighter pattern, a "
+            "glob, or context_lines=0"
+        )
+    elif glob and files_scanned == 0:
+        out["note"] = (
+            "glob selected zero files across the configured roots — it "
+            "is fnmatch'd against each root-relative path; use 'dir/*' "
+            "for a subtree or check the path"
         )
     return json.dumps(out, indent=2)
 
