@@ -8,6 +8,40 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Changed
+- **Per-run PR comments, collapse instead of edit-forever** (#29). Every
+  review used to find-or-edit the same one comment on a PR, so review
+  N+1's PATCH silently overwrote review N's verdict with no trace it
+  had changed — a retracted finding and a live one were
+  indistinguishable once the comment was reused. Each review run now
+  owns exactly one comment (`<!-- cora:progress:<run_id> -->` while
+  in-flight, PATCHed in place, then swapped to `<!-- cora:verdict:<run_id> -->`
+  for the final verdict), keyed on `GITHUB_RUN_ID` so a cancelled run's
+  leftover placeholder is never mistaken for a later run's. Once that
+  run's own comment is live, every *other* cora comment on the PR
+  (older verdicts, orphaned placeholders, and pre-migration
+  single-comment-loop bodies still carrying only a `LEGACY_COMMENT_MARKERS`
+  / `COMMENT_MARKER` marker) is collapsed via the GraphQL
+  `minimizeComment` mutation (classifier `OUTDATED`) — REST has no
+  equivalent. The collapse runs LAST, after the new comment is
+  confirmed live, so a cancelled or failed run never hides the last
+  good review; it is also purely cosmetic and fully soft-fail (a
+  `::warning::` and move on for a non-zero rc, an already-minimized
+  comment, or the sneakier case of a GraphQL `errors` array on an
+  HTTP-200 response), so a collapse failure can never lose a review.
+  A pre-migration PR's legacy comment is minimized on its next review
+  rather than adopted, so the new loop starts clean instead of
+  inheriting the old edit history it exists to escape.
+  **Trade-off, left for a follow-up**: every review run now posts (and
+  notifies watchers of) a new comment, even when a PR is pushed to
+  repeatedly at the same head SHA in quick succession — noise that the
+  old single-edited-comment behaviour didn't have. A head-SHA-keyed
+  variant (new comment only when the SHA changes, still edit-in-place
+  for reruns on the same SHA) would fix that; not implemented here.
+  `post_or_edit_comment` is gone — replaced by `create_progress_comment`
+  / `update_run_comment` / `minimize_superseded_comments` in
+  `cora.core.comment`.
+
 ### Fixed
 - **`detect_blocker` no longer counts a retracted `🚨 Blocker` bullet.**
   Observed live on imlach/cora#25: a review posted a Blocker bullet reading

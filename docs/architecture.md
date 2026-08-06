@@ -24,8 +24,9 @@ At a high level, a run does this:
    continuation, and optional second opinion depending on settings.
 5. Strip or suppress unsafe reasoning leakage, parse the verdict, and
    compose the final review body.
-6. Report through the configured reporter, normally a GitHub sticky
-   comment plus verdict check-run.
+6. Report through the configured reporter, normally a GitHub comment
+   plus verdict check-run — one comment per review run, with the
+   previous run's comment collapsed once the new one is live.
 
 The entrypoint treats review verdicts and policy skips as completed runs.
 The GitHub comment and check-run carry the review signal; the process exits
