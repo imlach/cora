@@ -21,7 +21,16 @@ by `run_review`; the legacy env toggle otherwise):
 
 - **CI delta** — `gh api /repos/{repo}/commits/{head_sha}/check-runs`,
   hashed and compared to the prior snapshot. New failure → inject a
-  fresh `gather_ci_context` block.
+  fresh `gather_ci_context` block. A check-run turning GREEN (success,
+  where the prior observation had it pending/missing/red) injects too —
+  the motivating case (cora issue #23): a deep review that forms a 🚨
+  Blocker claiming a build/test failure while that check is still in
+  flight never learns the check went green a few turns later unless
+  something tells it. The green-delta body names the check and tells
+  the model to re-verify or downgrade any compile/test-failure finding
+  it made; this is the PRIMARY fix (the model self-corrects with the
+  signal in context) — `cora.review._ci_gate` is the finalize-time
+  backstop for reviews that finish before this ever polls.
 - **HEAD SHA delta** — `gh api repos/{repo}/pulls/{n}` `.head.sha`.
   Changed mid-review → re-fetch the diff (`gh pr diff`) up to
   `DIFF_CHAR_CAP` and inject "diff has shifted, here it is".
@@ -54,7 +63,7 @@ import os
 import subprocess
 from typing import Callable
 
-from cora.core.config import DIFF_CHAR_CAP
+from cora.core.config import CHECK_RUN_NAME, DIFF_CHAR_CAP
 from cora.core.pr_context import fetch_pr_diff, gather_ci_context
 
 
@@ -83,6 +92,11 @@ _ENV_MASTER = "AGENT_REVIEW_CONTEXT_INJECTION"
 _ENV_CI = "AGENT_REVIEW_CONTEXT_INJECTION_CI"
 _ENV_HEAD = "AGENT_REVIEW_CONTEXT_INJECTION_HEAD"
 _ENV_COMMENTS = "AGENT_REVIEW_CONTEXT_INJECTION_COMMENTS"
+# Sub-toggle of the CI source (same endpoint + cadence as _ENV_CI —
+# turning that master CI toggle off disables this too). Separate switch
+# so a deployment can keep red-delta injection while opting out of the
+# green one specifically.
+_ENV_CI_GREEN = "AGENT_REVIEW_CONTEXT_INJECTION_CI_GREEN"
 
 
 def _env_on(name: str) -> bool:
@@ -147,6 +161,10 @@ class ContextRefresher:
     State lives in the instance:
       - `_last_check_hash` — SHA256 of the CI check-runs payload
         normalised to (name, status, conclusion) tuples.
+      - `_last_check_signature` — the normalised tuple list itself (not
+        just its hash), kept so the NEXT poll can diff per-check-run
+        transitions (e.g. "was this specific check green before?") —
+        the hash alone only proves *something* changed, not *what*.
       - `_last_head_sha` — the head SHA observed on the most recent
         HEAD check.
       - `_last_seen_comment_id` — the highest issue-comment id we've
@@ -175,6 +193,15 @@ class ContextRefresher:
         ci_enabled: bool | None = None,
         head_enabled: bool | None = None,
         comments_enabled: bool | None = None,
+        # Green-delta sub-toggle — see `_ENV_CI_GREEN`.
+        ci_green_enabled: bool | None = None,
+        # The reviewer's own verdict check-run name (`cfg.check_run_name`)
+        # plus the always-excluded `required` aggregator: a check turning
+        # green because IT'S OUR OWN check completing, or because the
+        # aggregator mirrors sibling state, isn't evidence about the PR's
+        # build/test — same exclusion `gather_ci_context` applies to the
+        # failing side. Defaults to the engine's own check-run name.
+        own_check_run_name: str = CHECK_RUN_NAME,
         # Inject callable for the gather_ci_context helper. Defaults to
         # the real implementation; tests stub it.
         gather_ci_context_fn: Callable[[str, str | None], str | None] = gather_ci_context,
@@ -193,6 +220,7 @@ class ContextRefresher:
             bot_login
             or os.environ.get("AGENT_REVIEW_LOOP_GUARD_BOT_LOGIN", "cora[bot]")
         ).lower()
+        self._own_check_run_name = own_check_run_name
         self._gather_ci_context = gather_ci_context_fn
         self._fetch_pr_diff = fetch_pr_diff_fn
         self._gh_api = gh_api_fn
@@ -207,12 +235,19 @@ class ContextRefresher:
         self._comments_on = (
             _env_on(_ENV_COMMENTS) if comments_enabled is None else comments_enabled
         )
+        self._ci_green_on = (
+            _env_on(_ENV_CI_GREEN) if ci_green_enabled is None else ci_green_enabled
+        )
 
         # Seed the dedupe state with the initial values so the first
         # `refresh()` call doesn't fire on the pre-baked context.
         # Tests can construct with the initial head_sha they care about.
         self._last_head_sha: str | None = head_sha
         self._last_check_hash: str | None = None
+        # Normalised (name, status, conclusion) signature from the most
+        # recent CI poll — None until the first poll runs. See the class
+        # docstring's "State lives in the instance" section.
+        self._last_check_signature: list[tuple[str, str, str]] | None = None
         self._last_seen_comment_id: int = 0
         self._extensions_consumed: int = 0
         self.last_source: str | None = None
@@ -321,10 +356,21 @@ class ContextRefresher:
         )
 
     def _check_ci_delta(self) -> str | None:
-        """Hash the failing-check-run set; emit a fresh
-        `gather_ci_context` block when the hash changes. Uses the
-        current `_last_head_sha` (so a head bump on the same turn
-        will pick the new SHA for the CI lookup too)."""
+        """Hash the check-run set; emit an injection when the hash
+        changes. Uses the current `_last_head_sha` (so a head bump on
+        the same turn will pick the new SHA for the CI lookup too).
+
+        Two shapes fire from here, red taking priority when both are
+        present in the same poll:
+
+        1. **Red** — `gather_ci_context` finds a failing check. Reuses
+           the standard formatter so the body shape matches the initial
+           prompt's CI block — the model has already learned to read it.
+        2. **Green** — no failures, but a check-run that was NOT green
+           on the prior observation (pending, missing, or itself
+           red) is green now. See `_newly_green_checks` +
+           `_green_delta_injection`; killswitch `_ci_green_on`.
+        """
         head = self._last_head_sha
         if not head:
             return None
@@ -351,20 +397,84 @@ class ContextRefresher:
         if sig_hash == self._last_check_hash:
             return None
         is_first_check = self._last_check_hash is None
+        # Snapshot the PRIOR signature before overwriting it — the green
+        # delta below diffs against it to tell "was already green" apart
+        # from "just turned green".
+        prior_signature = self._last_check_signature
         self._last_check_hash = sig_hash
+        self._last_check_signature = signature
         # First-ever observation isn't a delta — it's the baseline. The
         # initial prompt already carried `gather_ci_context` at start.
         if is_first_check:
             return None
-        # Reuse the standard gather_ci_context formatter so the body
-        # shape matches the initial prompt's CI block — the model has
-        # already learned to read it.
         ci_body = self._gather_ci_context(self._repo, head)
-        if not ci_body:
+        if ci_body:
+            return wrap_injection(
+                reason="CI checks changed since last observation",
+                body=ci_body,
+            )
+        if not self._ci_green_on:
             return None
+        newly_green = self._newly_green_checks(prior_signature, signature)
+        if not newly_green:
+            return None
+        return self._green_delta_injection(head, newly_green)
+
+    def _newly_green_checks(
+        self,
+        prior: list[tuple[str, str, str]] | None,
+        current: list[tuple[str, str, str]],
+    ) -> list[str]:
+        """Names of checks that are `completed`/`success` NOW but were
+        not in that exact state on the prior poll (pending, missing
+        entirely, or a different conclusion). Own-check + `required`
+        aggregator excluded — same feedback-loop / mirrors-sibling-state
+        reasoning `gather_ci_context` applies on the failing side."""
+        prior_by_name = {name: (status, concl) for name, status, concl in (prior or [])}
+        newly_green = []
+        for name, status, conclusion in current:
+            if (
+                not name
+                or name == "required"
+                or name.startswith("agentic-pr-review")
+                or name == self._own_check_run_name
+            ):
+                continue
+            if status != "completed" or conclusion != "success":
+                continue
+            if prior_by_name.get(name) == (status, conclusion):
+                continue  # already green last time we looked — not a delta
+            newly_green.append(name)
+        return newly_green
+
+    def _green_delta_injection(self, head: str, newly_green: list[str]) -> str:
+        """Build the injection body for check-run(s) that just turned
+        green — the issue #23 motivating shape: a review forms a 🚨
+        Blocker asserting a build/test failure while the real check is
+        still in flight, then that check passes minutes later with no
+        way for the model to find out. Names each check explicitly and
+        tells the model what to do with a prior compile/test-failure
+        claim, rather than just handing back the raw CI section again."""
+        lines = [
+            "## CI check(s) turned green",
+            "",
+            (
+                f"The following check(s) completed successfully for HEAD "
+                f"`{head}` — on the previous observation they were pending, "
+                "missing, or not yet green:"
+            ),
+            "",
+        ]
+        for name in newly_green:
+            lines.append(
+                f"- build/test check `{name}` completed successfully for "
+                f"HEAD `{head}`. Findings asserting this code fails to "
+                "compile or fails tests are contradicted by CI; re-verify "
+                "or downgrade them."
+            )
         return wrap_injection(
-            reason="CI checks changed since last observation",
-            body=ci_body,
+            reason="CI check(s) transitioned to success since last observation",
+            body="\n".join(lines),
         )
 
     def _check_comments_delta(self) -> str | None:

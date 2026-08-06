@@ -46,6 +46,8 @@ def test_defaults_mirror_engine_constants():
     assert d.context_injection_ci == c.CONTEXT_INJECTION_CI
     assert d.context_injection_head == c.CONTEXT_INJECTION_HEAD
     assert d.context_injection_comments == c.CONTEXT_INJECTION_COMMENTS
+    assert d.context_injection_ci_green == c.CONTEXT_INJECTION_CI_GREEN
+    assert d.ci_verdict_gate == c.CI_VERDICT_GATE_ENABLED
     assert d.transcript_source == c.DEFAULT_TRANSCRIPT_SOURCE
     # Exhausted-spiral escalation — on by default (killswitch), like the
     # re-draw it backstops.
@@ -245,6 +247,8 @@ def test_from_env_default_true_kill_switches_are_typo_safe():
             "AGENT_REVIEW_CONTEXT_INJECTION_CI": " false ",
             "AGENT_REVIEW_CONTEXT_INJECTION_HEAD": "nope",
             "AGENT_REVIEW_CONTEXT_INJECTION_COMMENTS": "",
+            "AGENT_REVIEW_CONTEXT_INJECTION_CI_GREEN": "false",
+            "AGENT_REVIEW_CI_VERDICT_GATE": "0",
         }
     )
     assert fe.patch_escalation is True       # "0" is not "false"
@@ -252,6 +256,8 @@ def test_from_env_default_true_kill_switches_are_typo_safe():
     assert fe.context_injection_ci is False  # whitespace tolerated
     assert fe.context_injection_head is True
     assert fe.context_injection_comments is True  # empty ≠ "false"
+    assert fe.context_injection_ci_green is False
+    assert fe.ci_verdict_gate is True         # "0" is not "false"
 
 
 # ── Wall-time ops overrides ──────────────────────────────────────────

@@ -169,6 +169,201 @@ def test_ci_delta_injects_when_signature_changes():
     assert refresher.last_source == "ci"
 
 
+# ---- CI green delta -----------------------------------------------
+
+
+def test_ci_green_delta_injects_when_check_turns_green():
+    """A check that was pending on the baseline poll and is `success` on
+    the next poll injects a green-delta body — the model gets told the
+    build/test check passed, not just that "something changed"."""
+    state = {"runs": [
+        {"name": "build", "status": "in_progress", "conclusion": None},
+    ]}
+
+    def ci_resp():
+        return {"check_runs": state["runs"]}
+
+    refresher = _make_refresher(
+        head_sha="sha",
+        ci_context_fn=lambda _r, _s: None,
+        gh_api_responses={
+            "/repos/owner/repo/pulls/123": {"head": {"sha": "sha"}},
+            "/repos/owner/repo/commits/sha/check-runs": ci_resp,
+        },
+    )
+    # Turn 3 — seed baseline (in_progress).
+    asyncio.run(refresher.refresh(turn=3))
+    # Flip to green.
+    state["runs"] = [
+        {"name": "build", "status": "completed", "conclusion": "success"},
+    ]
+    result = asyncio.run(refresher.refresh(turn=6))
+    assert result is not None
+    assert "[CONTEXT UPDATE" in result
+    assert "CI check(s) turned green" in result
+    assert "`build`" in result
+    assert "contradicted by CI" in result
+    assert refresher.last_source == "ci"
+
+
+def test_ci_green_delta_ignores_check_already_green_last_poll():
+    """A check that was ALREADY success on the prior poll doesn't
+    re-fire just because some unrelated check's signature changed."""
+    state = {"runs": [
+        {"name": "build", "status": "completed", "conclusion": "success"},
+        {"name": "lint", "status": "in_progress", "conclusion": None},
+    ]}
+
+    def ci_resp():
+        return {"check_runs": state["runs"]}
+
+    refresher = _make_refresher(
+        head_sha="sha",
+        ci_context_fn=lambda _r, _s: None,
+        gh_api_responses={
+            "/repos/owner/repo/pulls/123": {"head": {"sha": "sha"}},
+            "/repos/owner/repo/commits/sha/check-runs": ci_resp,
+        },
+    )
+    asyncio.run(refresher.refresh(turn=3))  # baseline: build already green
+    state["runs"] = [
+        {"name": "build", "status": "completed", "conclusion": "success"},
+        {"name": "lint", "status": "completed", "conclusion": "success"},
+    ]
+    result = asyncio.run(refresher.refresh(turn=6))
+    assert result is not None
+    assert "`lint`" in result
+    assert "`build`" not in result
+
+
+def test_ci_green_delta_excludes_own_check_and_required_aggregator():
+    """The reviewer's own verdict check-run and the `required` aggregator
+    turning green are not evidence about the PR — both are excluded,
+    same as the failing-side exclusion in `gather_ci_context`."""
+    state = {"runs": [
+        {"name": "cora", "status": "in_progress", "conclusion": None},
+        {"name": "required", "status": "in_progress", "conclusion": None},
+    ]}
+
+    def ci_resp():
+        return {"check_runs": state["runs"]}
+
+    refresher = _make_refresher(
+        head_sha="sha",
+        ci_context_fn=lambda _r, _s: None,
+        gh_api_responses={
+            "/repos/owner/repo/pulls/123": {"head": {"sha": "sha"}},
+            "/repos/owner/repo/commits/sha/check-runs": ci_resp,
+        },
+    )
+    asyncio.run(refresher.refresh(turn=3))  # baseline
+    state["runs"] = [
+        {"name": "cora", "status": "completed", "conclusion": "success"},
+        {"name": "required", "status": "completed", "conclusion": "success"},
+    ]
+    result = asyncio.run(refresher.refresh(turn=6))
+    assert result is None
+
+
+def test_ci_green_delta_red_takes_priority_over_green_in_same_poll():
+    """When one check fails and another turns green in the SAME poll,
+    the failing-check body wins (existing `gather_ci_context` behaviour
+    is unchanged) — a red signal must never be shadowed by a green one."""
+    state = {"runs": [
+        {"name": "build", "status": "in_progress", "conclusion": None},
+        {"name": "lint", "status": "in_progress", "conclusion": None},
+    ]}
+
+    def ci_resp():
+        return {"check_runs": state["runs"]}
+
+    refresher = _make_refresher(
+        head_sha="sha",
+        ci_context_fn=lambda _r, _s: "## CI status — failing checks\nlint failed",
+        gh_api_responses={
+            "/repos/owner/repo/pulls/123": {"head": {"sha": "sha"}},
+            "/repos/owner/repo/commits/sha/check-runs": ci_resp,
+        },
+    )
+    asyncio.run(refresher.refresh(turn=3))  # baseline
+    state["runs"] = [
+        {"name": "build", "status": "completed", "conclusion": "success"},
+        {"name": "lint", "status": "completed", "conclusion": "failure"},
+    ]
+    result = asyncio.run(refresher.refresh(turn=6))
+    assert result is not None
+    assert "lint failed" in result
+    assert "turned green" not in result
+
+
+def test_ci_green_delta_per_source_env_toggle(monkeypatch):
+    """`AGENT_REVIEW_CONTEXT_INJECTION_CI_GREEN=false` suppresses the
+    green-delta injection while the base CI source (red failures) stays
+    on — the two are independently switchable."""
+    state = {"runs": [
+        {"name": "build", "status": "in_progress", "conclusion": None},
+    ]}
+
+    def ci_resp():
+        return {"check_runs": state["runs"]}
+
+    refresher = _make_refresher(
+        head_sha="sha",
+        ci_context_fn=lambda _r, _s: None,
+        env_overrides={"AGENT_REVIEW_CONTEXT_INJECTION_CI_GREEN": "false"},
+        monkeypatch=monkeypatch,
+        gh_api_responses={
+            "/repos/owner/repo/pulls/123": {"head": {"sha": "sha"}},
+            "/repos/owner/repo/commits/sha/check-runs": ci_resp,
+        },
+    )
+    asyncio.run(refresher.refresh(turn=3))  # baseline
+    state["runs"] = [
+        {"name": "build", "status": "completed", "conclusion": "success"},
+    ]
+    result = asyncio.run(refresher.refresh(turn=6))
+    assert result is None
+
+
+def test_ci_green_delta_config_threaded_flag_and_own_check_name():
+    """`own_check_run_name` ctor arg (threaded from `cfg.check_run_name`
+    in `_tiers.py`) excludes a rebranded verdict check by its configured
+    name, not just the packaged default `cora`."""
+    from cora.core.context_refresher import ContextRefresher
+
+    state = {"runs": [
+        {"name": "my-reviewer", "status": "in_progress", "conclusion": None},
+        {"name": "build", "status": "in_progress", "conclusion": None},
+    ]}
+
+    def stub_gh(path: str) -> str | None:
+        if path.startswith("/repos/owner/repo/pulls/"):
+            return json.dumps({"head": {"sha": "sha"}})
+        if path.startswith("/repos/owner/repo/commits/sha/check-runs"):
+            return json.dumps({"check_runs": state["runs"]})
+        return None
+
+    refresher = ContextRefresher(
+        repo="owner/repo",
+        pr_number="123",
+        head_sha="sha",
+        start_timestamp_iso="2026-05-27T00:00:00Z",
+        own_check_run_name="my-reviewer",
+        gather_ci_context_fn=lambda _r, _s: None,
+        fetch_pr_diff_fn=lambda _p: "diff",
+        gh_api_fn=stub_gh,
+    )
+    asyncio.run(refresher.refresh(turn=3))  # baseline
+    state["runs"] = [
+        {"name": "my-reviewer", "status": "completed", "conclusion": "success"},
+        {"name": "build", "status": "completed", "conclusion": "success"},
+    ]
+    result = asyncio.run(refresher.refresh(turn=6))
+    assert result is not None
+    assert "`build`" in result
+    assert "my-reviewer" not in result
+
+
 # ---- Comments delta ----------------------------------------------
 
 

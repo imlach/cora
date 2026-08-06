@@ -87,12 +87,27 @@ kill switches:
 | Variable | Purpose |
 | --- | --- |
 | `AGENT_REVIEW_CONTEXT_INJECTION` | Master context-injection switch |
-| `AGENT_REVIEW_CONTEXT_INJECTION_CI` | Inject CI state changes |
+| `AGENT_REVIEW_CONTEXT_INJECTION_CI` | Inject CI state changes (failures AND check-runs turning green) |
+| `AGENT_REVIEW_CONTEXT_INJECTION_CI_GREEN` | Sub-toggle of the CI source: inject when a check-run turns green, not just on a new failure. Disabling the CI toggle above disables this too |
 | `AGENT_REVIEW_CONTEXT_INJECTION_HEAD` | Inject PR head updates |
 | `AGENT_REVIEW_CONTEXT_INJECTION_COMMENTS` | Inject new human comments |
 
 Set any of those variables to the literal string `false` to disable that
 piece.
+
+On a settled `needs changes` verdict, a separate finalize-time gate does
+one bounded re-poll of the reviewed HEAD SHA's check-runs before posting.
+If every relevant check is green, blocker findings matching a narrow
+compile/test-failure claim pattern (e.g. "won't compile", "fails in CI")
+get an appended harness note, and — only when every blocker in the review
+matches — the verdict downgrades one step. This is the backstop for a
+review that finishes before CI does; the context-injection mechanism
+above is the primary fix. Soft-fails to "post unchanged" on any API
+error.
+
+| Variable | Purpose |
+| --- | --- |
+| `AGENT_REVIEW_CI_VERDICT_GATE` | Default-true kill switch for the finalize-time CI-verdict gate |
 
 ## MCP And Tool Exposure
 

@@ -405,6 +405,19 @@ CONTEXT_INJECTION_ENABLED = True
 CONTEXT_INJECTION_CI = True
 CONTEXT_INJECTION_HEAD = True
 CONTEXT_INJECTION_COMMENTS = True
+# Sub-toggle of the CI source: a check-run transitioning to success (one
+# that was pending/missing/red on the prior observation) also injects,
+# not just a new failure. Same endpoint + cadence as CONTEXT_INJECTION_CI —
+# disabling that master CI toggle disables this too; this toggle lets a
+# deployment keep red-delta injection while opting out of the green one
+# (e.g. if it turns out noisy on a workflow with many short-lived checks).
+CONTEXT_INJECTION_CI_GREEN = True
+
+# Finalize-time CI-verdict gate (see `cora.review._ci_gate`) — the
+# backstop for a `needs changes` verdict that finished before CI did.
+# Default-on kill switch (only the literal "false" disables), same
+# typo-safe shape as the other reliability toggles above.
+CI_VERDICT_GATE_ENABLED = True
 
 # Tool-use trajectory capture `source` tag (`REVIEWER_TRANSCRIPT_SOURCE`)
 # — labels rows in the captured JSONL for teacher-data provenance.
