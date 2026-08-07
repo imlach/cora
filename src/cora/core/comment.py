@@ -234,6 +234,15 @@ def _minimize_comment(node_id: str, env: dict[str, str]) -> bool:
     graphql` exits 0 on an HTTP 200 whose JSON body still carries a
     top-level `errors` array, so a clean rc alone doesn't mean the
     mutation applied.
+
+    Adopter caveat: minimizing BUMPS the comment's REST `updated_at`
+    (observed live: a comment minimized one second after the new run's
+    finalize PATCH carried the newer timestamp of the two). Because the
+    collapse deliberately runs after the new comment is live, the
+    freshest `updated_at` on a PR is therefore usually a *superseded*
+    comment — anything selecting "the current cora comment" must key on
+    `created_at` or the run-scoped verdict marker, never on `updated_at`
+    recency.
     """
     proc = _gh_with_one_retry(
         [

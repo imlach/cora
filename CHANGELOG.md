@@ -45,6 +45,15 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   `post_or_edit_comment` is gone — replaced by `create_progress_comment`
   / `update_run_comment` / `minimize_superseded_comments` in
   `cora.core.comment`.
+  **Adopter migration note**: `minimizeComment` bumps the collapsed
+  comment's REST `updated_at`, and the collapse deliberately runs after
+  the new comment is live — so the freshest `updated_at` on a reviewed
+  PR is usually a *superseded* comment. Tooling that finds "the current
+  cora comment" by `updated_at` recency (e.g. a
+  `max_by(.updated_at)`-style watchdog) must switch to `created_at` or
+  to the run-scoped verdict marker before adopting this release;
+  `created_at` selection is also correct against the old
+  single-edited-comment engine, so it can ship first.
 
 ### Fixed
 - **`detect_blocker` no longer counts a retracted `🚨 Blocker` bullet.**
