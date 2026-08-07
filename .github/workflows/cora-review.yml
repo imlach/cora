@@ -168,6 +168,11 @@ jobs:
           # Unset → engine localhost default (review soft-skips).
           LITELLM_BASE_URL: ${{ secrets.CORA_LLM_BASE_URL }}
           REVIEW_MODEL: ${{ steps.mode.outputs.review_model }}
+          # The engine's DEFAULT_T1_MODEL ("core") is a retired gateway
+          # alias — left unset, every T1 escalation from this repo 403'd
+          # at the gateway and the review kept whatever T0 had (observed
+          # on #33: T0 spiral-redraw exhausted, T1 forbidden, skipped).
+          T1_MODEL: forte
           MAX_TOOL_ITERATIONS: ${{ steps.mode.outputs.max_iterations }}
           AGENT_REVIEW_SKIP_T0: ${{ steps.mode.outputs.skip_t0 }}
           AGENT_REVIEW_T1_CONTINUATION: "true"
