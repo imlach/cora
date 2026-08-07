@@ -212,8 +212,9 @@ def fetch_classifier_rationale(repo: str, pr_number: str) -> str | None:
         b = (c or {}).get("body") or ""
         if _CLASSIFIER_COMMENT_MARKER in b:
             body = b
-            # Don't break — last comment with the marker wins, matching
-            # `post_or_edit_comment`'s "edit-in-place; first match by id".
+            # Don't break — the classifier edits its own comment in
+            # place, so the last marked comment in listing order is the
+            # freshest rationale.
     if not body:
         return None
     m = _CLASSIFIER_META_RE.search(body)

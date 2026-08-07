@@ -1,12 +1,21 @@
-"""GitHub PR-comment posting (find-or-edit, retry, skip + initial bodies)
-and the auto-merge label-remove helper.
+"""GitHub PR-comment posting (per-run create/update, retry, skip +
+initial bodies) and the auto-merge label-remove helper.
 
-`post_or_edit_comment` recognises the current cora marker plus the
-retired-marker shapes (pre-rename and earlier) so an in-flight PR's
-existing comment is edited in place rather than getting a stale orphan
-+ a fresh comment. Subprocess-based —
-prefers the cora App-minted token when set so the audit actor is
-`cora[bot]`; falls back to the workflow's inherited GITHUB_TOKEN.
+Per-run comment loop (cora#29): a review run gets exactly one comment
+that it owns — created fresh by `create_progress_comment`, PATCHed in
+place by `update_run_comment` as the run progresses and again to post
+the verdict — and, once that verdict lands, every *other* cora comment
+on the PR is collapsed via `minimize_superseded_comments`. That split
+replaces the old `post_or_edit_comment` (find-the-first-cora-comment,
+edit forever), which destroyed review history: run N+1's PATCH
+overwrote run N's verdict with no trace it had changed. Comments are
+now append-then-collapse, the same shape a human reviewer's repeated
+reviews produce, and the collapse runs LAST so a cancelled/failed run
+never hides the last good review.
+
+Subprocess-based throughout — prefers the cora App-minted token when
+set so the audit actor is `cora[bot]`; falls back to the workflow's
+inherited GITHUB_TOKEN.
 """
 
 from __future__ import annotations
@@ -23,6 +32,9 @@ from cora.core.config import (
     AUTOMERGE_LABEL,
     COMMENT_MARKER,
     LEGACY_COMMENT_MARKERS,
+    MARKER_SUFFIX,
+    PROGRESS_MARKER_PREFIX,
+    VERDICT_MARKER_PREFIX,
 )
 
 
@@ -59,35 +71,123 @@ def _gh_with_one_retry(
     )
 
 
-def post_or_edit_comment(repo: str, pr_number: str, body: str) -> None:
-    # Edit-last across migrations: recognise the new marker AND the
-    # retired ones (`<!-- agentic-review:v2 -->` pre-rename, `:v1` from
-    # the old single-shot path, `-loop:v1` from the old loop path) so an
-    # in-flight PR's existing comment is edited in place rather than
-    # getting a stale orphan + a fresh cora comment.
-    #
-    # Comment posting uses the cora App-minted token (CORA_GH_TOKEN
-    # env, set by the workflow's create-github-app-token step) when
-    # available so the comment actor is `cora[bot]`. Falls back to
-    # the inherited workflow GITHUB_TOKEN when the mint step soft-
-    # failed or the App isn't configured.
-    # Same App token already used for the inline-suggestion PR review
-    # and the draft-PR path — consolidates the audit identity.
+def _run_id() -> str:
+    """`GITHUB_RUN_ID` identifies the current workflow run — the same
+    env var `_tiers.py`'s trajectory-capture path keys per-run files
+    on, and `_workflow_run_url` reads for the run-logs deeplink.
+    "local" outside Actions (bare invocations, tests) so run-scoping
+    degrades gracefully instead of crashing; it just isn't unique
+    across local invocations, which don't share a PR to collide on
+    anyway."""
+    return os.environ.get("GITHUB_RUN_ID", "local")
+
+
+def _progress_marker(run_id: str) -> str:
+    return f"{PROGRESS_MARKER_PREFIX}{run_id}{MARKER_SUFFIX}"
+
+
+def _verdict_marker(run_id: str) -> str:
+    return f"{VERDICT_MARKER_PREFIX}{run_id}{MARKER_SUFFIX}"
+
+
+def _with_run_marker(body: str, marker: str) -> str:
+    """Insert the run-scoped marker as the SECOND line, directly after
+    the rendered body's leading `COMMENT_MARKER`.
+
+    The order is load-bearing, not cosmetic. `COMMENT_MARKER` is the
+    documented "this is a cora comment" signal and adopters match it
+    with `startswith` — a deployment's automerge watchdog does exactly
+    that against the raw comment body. Putting the run marker in front
+    would silently break every such matcher while looking correct from
+    inside the engine, so the generic marker keeps position 0 and the
+    run scope rides directly behind it.
+
+    Every posted body ends up satisfying the same invariant —
+    `COMMENT_MARKER` first, run marker second — including one that
+    arrived without the generic marker (nothing in-tree does that, but
+    the discovery predicate would silently fail to find such a comment
+    again, so the marker is added rather than assumed)."""
+    head, sep, rest = body.partition("\n")
+    if head == COMMENT_MARKER and sep:
+        return f"{head}\n{marker}\n{rest}"
+    return f"{COMMENT_MARKER}\n{marker}\n{body}"
+
+
+def _own_comment_jq(run_id: str) -> str:
+    """jq predicate for "a cora comment written by THIS run": the
+    generic marker at position 0 AND this run's marker somewhere in the
+    body. Both halves are needed — `startswith` alone can't tell runs
+    apart, and a bare `contains` would match a human comment quoting a
+    marker in a code fence (cora#29's own issue body does that)."""
+    return (
+        f'((.body | startswith("{COMMENT_MARKER}")) and ('
+        f'(.body | contains("{_progress_marker(run_id)}")) or '
+        f'(.body | contains("{_verdict_marker(run_id)}"))))'
+    )
+
+
+def _startswith_any_jq(markers: tuple[str, ...]) -> str:
+    """jq boolean expression: true if `.body` starts with any of
+    `markers` — the "is this a cora comment at all" discovery test.
+    `GITHUB_RUN_ID` is GitHub-minted (numeric), so no escaping is
+    needed for the f-string interpolation here."""
+    return " or ".join(f'(.body | startswith("{m}"))' for m in markers)
+
+
+def _cora_env() -> dict[str, str]:
+    """`os.environ` with the cora App token (when set) swapped in as
+    `GH_TOKEN`, so the comment/mutation actor is `cora[bot]` rather
+    than the workflow's inherited `GITHUB_TOKEN`."""
     env = os.environ.copy()
     app_token = os.environ.get("CORA_GH_TOKEN", "").strip()
     if app_token:
         env["GH_TOKEN"] = app_token
+    return env
 
-    marker_predicates = " or ".join(
-        f'(.body | startswith("{m}"))'
-        for m in (COMMENT_MARKER, *LEGACY_COMMENT_MARKERS)
+
+def create_progress_comment(repo: str, pr_number: str, body: str) -> None:
+    """Create THIS run's progress placeholder as a brand-new comment —
+    never finds-or-edits. A prior run's leftover placeholder (left
+    behind when the workflow's `concurrency` block cancels an
+    in-flight run on `synchronize`) carries a different run id, so it's
+    never mistaken for this run's; `minimize_superseded_comments`
+    collapses it once this run finishes.
+    """
+    proc = _gh_with_one_retry(
+        [
+            "gh", "pr", "comment", pr_number,
+            "--body", _with_run_marker(body, _progress_marker(_run_id())),
+        ],
+        env=_cora_env(),
     )
+    if proc.returncode != 0:
+        raise RuntimeError(f"create comment failed: {proc.stderr.strip()}")
+
+
+def update_run_comment(repo: str, pr_number: str, body: str, *, final: bool) -> None:
+    """PATCH THIS run's own comment — matched by `GITHUB_RUN_ID`, never
+    another run's — swapping in a fresh marker + body. `final=False`
+    keeps the progress marker (mid-run updates); `final=True` swaps to
+    the verdict marker (`post_review` / `post_skip` — a completed run
+    is never edited again once a later run supersedes it).
+
+    Creates a comment instead of PATCHing when this run has none yet:
+    quick mode and every early-exit skip path never call
+    `create_progress_comment` (the placeholder is deep-mode only), so
+    the verdict/skip comment is often this run's first and only one.
+    """
+    run_id = _run_id()
+    marker = _verdict_marker(run_id) if final else _progress_marker(run_id)
+    full_body = _with_run_marker(body, marker)
+    env = _cora_env()
+
+    own_predicate = _own_comment_jq(run_id)
     list_proc = _gh_with_one_retry(
         [
             "gh", "api",
             f"repos/{repo}/issues/{pr_number}/comments",
             "--jq",
-            f"[.[] | select({marker_predicates})] | first | .id // empty",
+            f"[.[] | select({own_predicate})] | first | .id // empty",
         ],
         env=env,
     )
@@ -103,17 +203,125 @@ def post_or_edit_comment(repo: str, pr_number: str, body: str) -> None:
              f"repos/{repo}/issues/comments/{listing}",
              "--input", "-"],
             env=env,
-            input_=json.dumps({"body": body}),
+            input_=json.dumps({"body": full_body}),
         )
         if proc.returncode != 0:
             raise RuntimeError(f"PATCH comment failed: {proc.stderr.strip()}")
     else:
         proc = _gh_with_one_retry(
-            ["gh", "pr", "comment", pr_number, "--body", body],
+            ["gh", "pr", "comment", pr_number, "--body", full_body],
             env=env,
         )
         if proc.returncode != 0:
             raise RuntimeError(f"create comment failed: {proc.stderr.strip()}")
+
+
+# GraphQL is the only way to minimise a comment — REST has no
+# equivalent. `subjectId` is the comment's *node_id*, not its REST
+# `id`; `OUTDATED` is the honest classifier for "a later review
+# replaced this one" (vs. SPAM/ABUSE/OFF_TOPIC/RESOLVED/DUPLICATE).
+_MINIMIZE_COMMENT_MUTATION = (
+    "mutation($id: ID!) { "
+    "minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { "
+    "minimizedComment { isMinimized } } }"
+)
+
+
+def _minimize_comment(node_id: str, env: dict[str, str]) -> bool:
+    """Best-effort GraphQL `minimizeComment` on one comment. Returns
+    whether it worked; never raises. Two failure shapes: a non-zero rc
+    (permissions, transient API error), and the sneakier one — `gh api
+    graphql` exits 0 on an HTTP 200 whose JSON body still carries a
+    top-level `errors` array, so a clean rc alone doesn't mean the
+    mutation applied.
+
+    Adopter caveat: minimizing BUMPS the comment's REST `updated_at`
+    (observed live: a comment minimized one second after the new run's
+    finalize PATCH carried the newer timestamp of the two). Because the
+    collapse deliberately runs after the new comment is live, the
+    freshest `updated_at` on a PR is therefore usually a *superseded*
+    comment — anything selecting "the current cora comment" must key on
+    `created_at` or the run-scoped verdict marker, never on `updated_at`
+    recency.
+    """
+    proc = _gh_with_one_retry(
+        [
+            "gh", "api", "graphql",
+            "-f", f"query={_MINIMIZE_COMMENT_MUTATION}",
+            "-f", f"id={node_id}",
+        ],
+        env=env,
+    )
+    if proc.returncode != 0:
+        print(
+            f"::warning::minimize comment {node_id} failed "
+            f"(rc={proc.returncode}): {proc.stderr.strip()[:300]}"
+        )
+        return False
+    try:
+        payload = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        print(f"::warning::minimize comment {node_id}: unparseable graphql response")
+        return False
+    if payload.get("errors"):
+        print(f"::warning::minimize comment {node_id}: graphql errors {payload['errors']}")
+        return False
+    return True
+
+
+def minimize_superseded_comments(repo: str, pr_number: str) -> None:
+    """Collapse every OTHER cora comment on the PR as OUTDATED, once
+    this run's own verdict/skip comment is live. `post_review` /
+    `post_skip` call this LAST, after `update_run_comment` finalises
+    this run's own comment — so a run that never gets that far
+    (cancelled, or the finalize PATCH itself failing) leaves the
+    previous verdict visible instead of collapsing it out from under a
+    review that never replaced it.
+
+    Purely cosmetic, so unlike its siblings above this soft-fails
+    end-to-end: any failure (listing the PR's comments, an
+    unparseable response, a missing `node_id`, the mutation itself)
+    prints `::warning::` and returns rather than raising. A review must
+    never be lost because a predecessor couldn't be collapsed.
+    """
+    try:
+        run_id = _run_id()
+        env = _cora_env()
+        # Every comment this engine writes opens with COMMENT_MARKER
+        # (the run marker sits on the line below it), so discovery is
+        # the generic marker plus the retired ones — a pre-migration
+        # comment gets collapsed rather than adopted, per cora#29.
+        cora_predicate = _startswith_any_jq(
+            (COMMENT_MARKER, *LEGACY_COMMENT_MARKERS)
+        )
+        own_predicate = _own_comment_jq(run_id)
+        list_proc = _gh_with_one_retry(
+            [
+                "gh", "api",
+                f"repos/{repo}/issues/{pr_number}/comments",
+                "--jq",
+                (
+                    f"[.[] | select({cora_predicate}) | select(({own_predicate}) | not) "
+                    f"| {{id: .id, node_id: .node_id}}]"
+                ),
+            ],
+            env=env,
+        )
+        if list_proc.returncode != 0:
+            print(
+                f"::warning::list comments for minimize failed "
+                f"(rc={list_proc.returncode}): {list_proc.stderr.strip()}"
+            )
+            return
+        targets = json.loads(list_proc.stdout or "[]")
+        for target in targets:
+            node_id = target.get("node_id")
+            if not node_id:
+                print(f"::warning::minimize: comment id={target.get('id')} missing node_id, skipping")
+                continue
+            _minimize_comment(node_id, env)
+    except Exception as exc:  # noqa: BLE001 — cosmetic sweep, must never fail the review
+        print(f"::warning::minimize superseded comments failed: {exc}")
 
 
 def create_pr_review(repo: str, pr_number: str, body: str, event: str) -> None:
@@ -122,13 +330,15 @@ def create_pr_review(repo: str, pr_number: str, body: str, event: str) -> None:
     (COMMENT / REQUEST_CHANGES / APPROVE), instead of an issue comment.
 
     Opt-in (`ReviewerConfig.use_github_review`) — the default path stays
-    `post_or_edit_comment`. Unlike a comment, a Review is append-only:
-    GitHub has no "edit the bot's last review in place" affordance the
-    way the issue-comments API does, so each run files a fresh review
-    (the check-run still carries the single authoritative verdict).
+    the per-run comment loop (`update_run_comment` +
+    `minimize_superseded_comments`). Unlike a comment, a Review is
+    append-only: GitHub has no "edit the bot's last review in place"
+    affordance the way the issue-comments API does, so each run files a
+    fresh review (the check-run still carries the single authoritative
+    verdict).
 
-    Same token + transient-retry handling as `post_or_edit_comment` — the
-    cora App token when set (audit actor `cora[bot]`), else the
+    Same token + transient-retry handling as the rest of this module —
+    the cora App token when set (audit actor `cora[bot]`), else the
     inherited GITHUB_TOKEN.
     """
     env = os.environ.copy()

@@ -87,9 +87,10 @@ class Reporter(ABC):
 
     @abstractmethod
     def post_in_progress(self) -> None:
-        """Post/edit the in-progress placeholder comment (deep mode
-        only — quick mode's ~20-30s wall makes the
-        placeholder churn without benefit)."""
+        """Create this run's in-progress placeholder comment (deep mode
+        only — quick mode's ~20-30s wall makes the placeholder churn
+        without benefit). Always a new comment scoped to this run, never
+        a find-or-edit onto a leftover from a superseded run."""
 
     @abstractmethod
     def complete_check(
@@ -124,11 +125,14 @@ class Reporter(ABC):
 
     @abstractmethod
     def post_review(self, result: "ReviewResult") -> None:
-        """Render + post/edit the full review comment from the result."""
+        """Render the full review comment and finalise it as this run's
+        comment (progress → verdict marker swap, or a fresh comment for
+        quick mode), then collapse every other cora comment on the PR."""
 
     @abstractmethod
     def post_skip(self, reason: str) -> None:
-        """Post/edit a skip comment (reviewer didn't produce a verdict)."""
+        """Finalise a skip comment (reviewer didn't produce a verdict) —
+        a skip is a completed run, same treatment as `post_review`."""
 
     @abstractmethod
     def pause_automerge(self) -> bool:
@@ -301,11 +305,15 @@ class GitHubReporter(Reporter):
         return bool(self._check_id) and not self._check_done
 
     def post_in_progress(self) -> None:
-        from cora.core.comment import make_initial_comment, post_or_edit_comment
+        from cora.core.comment import create_progress_comment, make_initial_comment
 
         started = self.started_at or datetime.now(timezone.utc)
         with self._app_token_env():
-            post_or_edit_comment(
+            # Always a NEW comment for this run — never finds-or-edits a
+            # leftover placeholder from a cancelled prior run. That one
+            # gets collapsed by `minimize_superseded_comments` once this
+            # run's own verdict lands (post_review / post_skip).
+            create_progress_comment(
                 self.repo, self.pr_number, make_initial_comment(self.pr_number, started)
             )
 
@@ -384,7 +392,9 @@ class GitHubReporter(Reporter):
             # map is advisory (COMMENT) except the block verdict
             # (REQUEST_CHANGES); the check-run still carries the gating
             # conclusion. Default-OFF, so this branch only runs when a
-            # deployment opts in.
+            # deployment opts in. Reviews are append-only (no comment
+            # loop to speak of), so the per-run marker scheme doesn't
+            # apply here.
             from cora.core.comment import create_pr_review
             from cora.core.config import VERDICT_WORDS
             from cora.core.leak import verdict_to_review_event
@@ -395,16 +405,29 @@ class GitHubReporter(Reporter):
                 create_pr_review(self.repo, self.pr_number, body, event)
             return
 
-        from cora.core.comment import post_or_edit_comment
+        from cora.core.comment import minimize_superseded_comments, update_run_comment
 
         with self._app_token_env():
-            post_or_edit_comment(self.repo, self.pr_number, body)
+            # Finalise THIS run's comment (progress → verdict marker
+            # swap, or a fresh comment in quick mode) first; only once
+            # it's live do older cora comments get collapsed. Order
+            # matters: a finalize failure here must not have already
+            # minimised the previous verdict — see
+            # `minimize_superseded_comments`'s docstring.
+            update_run_comment(self.repo, self.pr_number, body, final=True)
+            minimize_superseded_comments(self.repo, self.pr_number)
 
     def post_skip(self, reason: str) -> None:
-        from cora.core.comment import make_skip_comment, post_or_edit_comment
+        from cora.core.comment import (
+            make_skip_comment,
+            minimize_superseded_comments,
+            update_run_comment,
+        )
 
         with self._app_token_env():
-            post_or_edit_comment(self.repo, self.pr_number, make_skip_comment(reason))
+            # A skip is a completed run, same as a verdict — final=True.
+            update_run_comment(self.repo, self.pr_number, make_skip_comment(reason), final=True)
+            minimize_superseded_comments(self.repo, self.pr_number)
 
     def pause_automerge(self) -> bool:
         from cora.core.comment import remove_automerge_label
