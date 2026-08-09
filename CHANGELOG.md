@@ -8,6 +8,8 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-08-09
+
 ### Fixed
 - **`no_tool_use` escalation died at the finish line.** The 0.1.7
   trigger's first live firing escalated correctly, T1 produced a
@@ -622,7 +624,8 @@ evolution summarised below and in the module docstrings.
   embed the `Authorization` header value; header values are redacted and
   the message is length-capped.
 
-[Unreleased]: https://github.com/imlach/cora/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/imlach/cora/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/imlach/cora/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/imlach/cora/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/imlach/cora/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/imlach/cora/compare/v0.1.4...v0.1.5
