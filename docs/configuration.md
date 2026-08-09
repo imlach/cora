@@ -116,6 +116,7 @@ initial prompt — is on by default and shares the same kill-switch shape:
 | Variable | Purpose |
 | --- | --- |
 | `AGENT_REVIEW_ISSUE_PREFETCH` | Set to `false` to disable the linked-issue pre-fetch. The `read_issue` deep-mode tool (below) is unaffected — it's controlled by `ReviewerConfig.local_issue_tools` |
+| `AGENT_REVIEW_THREAD_EVIDENCE` | Set to `false` to disable feeding recent maintainer PR comments into the review context. Default on. Only comments from `OWNER`/`MEMBER`/`COLLABORATOR` are read (`ReviewerConfig.thread_evidence_associations`), and the block is always wrapped `<untrusted-content>` — it is evidence to weigh, never instructions |
 
 ## MCP And Tool Exposure
 

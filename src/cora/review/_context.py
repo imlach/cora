@@ -46,6 +46,18 @@ async def assemble_context(run: ReviewRun) -> ReviewResult | None:
     _classifier_task = asyncio.create_task(
         asyncio.to_thread(_prc.fetch_classifier_rationale, run.repo, pr_number)
     )
+    # Recent maintainer comments (cora #37) — a re-review that can't see
+    # a rebuttal re-asserts the finding it refutes. Same concurrent
+    # pre-flight shape as the classifier lookup; disarmed by config.
+    _thread_task = (
+        asyncio.create_task(
+            asyncio.to_thread(
+                _prc.fetch_thread_evidence, run.repo, pr_number, cfg=cfg
+            )
+        )
+        if cfg.thread_evidence
+        else None
+    )
     # Cold-start pretrigger — warm a scale-from-zero backend now so its
     # restore overlaps retrieval instead of the first call. The warmup
     # alias set is config-supplied (empty default = disarmed).
@@ -79,6 +91,8 @@ async def assemble_context(run: ReviewRun) -> ReviewResult | None:
     except Exception as exc:  # noqa: BLE001
         _ci_task.cancel()
         _classifier_task.cancel()
+        if _thread_task is not None:
+            _thread_task.cancel()
         print(f"::warning::PR diff fetch failed: {exc}")
         # Preflight infra failure (GH diff API unreachable). `cancelled`
         # is tolerated by the merge gate so a transient GH blip doesn't
@@ -192,6 +206,17 @@ async def assemble_context(run: ReviewRun) -> ReviewResult | None:
     classifier_rationale = _classifier_raw if not run.bot_author else None
     if classifier_rationale:
         _gha_log(f"classifier rationale: {len(classifier_rationale)} chars")
+
+    # Thread evidence soft-fails to None like every other enrichment —
+    # a leaner prompt, never a failed review.
+    thread_evidence = None
+    if _thread_task is not None:
+        try:
+            thread_evidence = await _thread_task
+        except Exception as exc:  # noqa: BLE001
+            print(f"::warning::thread-evidence fetch failed: {exc}")
+    if thread_evidence:
+        _gha_log(f"thread evidence: {len(thread_evidence)} chars")
 
     # Release-notes pre-fetch for dep-bump PRs (`deps` label): extract the
     # upstream release/compare URL from the body and fetch it server-side
@@ -314,6 +339,7 @@ async def assemble_context(run: ReviewRun) -> ReviewResult | None:
         tools_available=not run.is_quick,
         ci_context=ci_context,
         classifier_rationale=classifier_rationale,
+        thread_evidence=thread_evidence,
         # Teacher-trajectory mode — opt-in, never the live default.
         broaden_tools=cfg.broaden_tools,
         fetch_tool_configured=bool(web_fetch_url),

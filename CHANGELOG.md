@@ -28,6 +28,28 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   is concrete, not abstract, so existing third-party providers keep
   working — they inherit a fallback that reports the missing capability
   rather than implying the file is absent.
+- **Re-reviews can see maintainer rebuttals** (#37, part 2). A review
+  had no view of anything a human had said on the PR: `pr_context`
+  listed comments only to find the classifier's own marked one. So a
+  maintainer who refuted a false finding *with log evidence* changed
+  nothing, and the re-review re-asserted the identical claim — a
+  deadlock only a human override broke. The initial prompt now carries
+  a "Discussion on this PR" section with the most recent maintainer
+  comments (`pr_context.fetch_thread_evidence`), instructing the model
+  to weigh a rebuttal's evidence and drop or downgrade the finding
+  rather than repeat it. Excluded: cora's own comments (anchoring the
+  reviewer on the verdict it is meant to re-examine), the classifier's
+  comment (already rendered separately), bots, and anyone outside
+  `thread_evidence_associations` (`OWNER`/`MEMBER`/`COLLABORATOR` —
+  the same standing bar `trigger.DEFAULT_ALLOWED_ASSOCIATIONS` uses,
+  since on a public repo anyone can comment). The association filter
+  narrows *whose* words are read, not whether they are instructions:
+  the block is wrapped `<untrusted-content>` regardless, and the
+  section text is explicit that a comment telling the reviewer what
+  verdict to reach is something to report, never obey. Bounded at 6
+  comments / 1.5K chars each / 6K total, all soft-fail to the previous
+  prompt shape. Default on; `AGENT_REVIEW_THREAD_EVIDENCE=false`
+  disables.
 
 ### Changed
 - **Prompts: a version's non-existence is never a Blocker** (#37, both
