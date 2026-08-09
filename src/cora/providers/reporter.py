@@ -92,6 +92,21 @@ class Reporter(ABC):
         without benefit). Always a new comment scoped to this run, never
         a find-or-edit onto a leftover from a superseded run."""
 
+    @property
+    def progress_open(self) -> bool:
+        """True while this run has a placeholder comment still reading
+        "in progress" — i.e. `post_in_progress` succeeded and no
+        terminal `post_review`/`post_skip` has replaced it.
+
+        The crash handler reads this to decide whether it has a stranded
+        placeholder to finalize (cora #14). Deliberately NOT abstract and
+        defaulting False: a third-party Reporter written before this must
+        keep subclassing, and False means the handler leaves it alone —
+        the conservative direction, since `update_run_comment` CREATES a
+        comment when the run has none, and a crash should not invent a
+        comment on a PR that never had one."""
+        return False
+
     @abstractmethod
     def complete_check(
         self,
@@ -263,6 +278,10 @@ class GitHubReporter(Reporter):
         self.verdict_words = verdict_words
         self._check_id: str | None = None
         self._check_done = False
+        # Placeholder-comment lifecycle, for `progress_open` — set when
+        # `post_in_progress` succeeds, cleared by the terminal comment
+        # writes (`post_review` / `post_skip`).
+        self._progress_posted = False
 
     def _app_token(self) -> str:
         if self.github_app_token is not None:
@@ -316,6 +335,13 @@ class GitHubReporter(Reporter):
             create_progress_comment(
                 self.repo, self.pr_number, make_initial_comment(self.pr_number, started)
             )
+        # Only after the create returns — a raising post leaves no
+        # placeholder to strand, and the caller soft-fails it.
+        self._progress_posted = True
+
+    @property
+    def progress_open(self) -> bool:
+        return self._progress_posted
 
     def complete_check(
         self,
@@ -403,6 +429,7 @@ class GitHubReporter(Reporter):
             event = verdict_to_review_event(result.verdict, words=words)
             with self._app_token_env():
                 create_pr_review(self.repo, self.pr_number, body, event)
+            self._progress_posted = False
             return
 
         from cora.core.comment import minimize_superseded_comments, update_run_comment
@@ -416,6 +443,7 @@ class GitHubReporter(Reporter):
             # `minimize_superseded_comments`'s docstring.
             update_run_comment(self.repo, self.pr_number, body, final=True)
             minimize_superseded_comments(self.repo, self.pr_number)
+        self._progress_posted = False
 
     def post_skip(self, reason: str) -> None:
         from cora.core.comment import (
@@ -428,6 +456,7 @@ class GitHubReporter(Reporter):
             # A skip is a completed run, same as a verdict — final=True.
             update_run_comment(self.repo, self.pr_number, make_skip_comment(reason), final=True)
             minimize_superseded_comments(self.repo, self.pr_number)
+        self._progress_posted = False
 
     def pause_automerge(self) -> bool:
         from cora.core.comment import remove_automerge_label
