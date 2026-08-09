@@ -448,6 +448,14 @@ CI_VERDICT_GATE_ENABLED = True
 # automerge decision; this stops the verdict line disagreeing with it.
 # Default-on kill switch, same typo-safe shape as the toggles above.
 RETRACTION_VERDICT_GATE_ENABLED = True
+# Include PASSING check names in the initial prompt's CI block, not just
+# failing ones (cora #44). Withholding them made an all-green PR the
+# reviewer's blindest case: `gather_ci_context` returned None when
+# nothing was red, and the prompt rightly forbids inferring success from
+# silence, so the model asserted compile/version failures the build had
+# already disproved. Names + conclusions only — a green job's log is
+# noise. Default-on kill switch, same shape as the toggles above.
+CI_CONTEXT_INCLUDE_PASSING = True
 
 # Tool-use trajectory capture `source` tag (`REVIEWER_TRANSCRIPT_SOURCE`)
 # — labels rows in the captured JSONL for teacher-data provenance.
