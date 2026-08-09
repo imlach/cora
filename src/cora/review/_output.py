@@ -23,6 +23,7 @@ from cora.core.leak import (
 from cora.core.log import _gha_log
 from cora.result import ReviewResult
 from cora.review._ci_gate import apply_ci_verdict_gate
+from cora.review._retraction_gate import apply_retraction_verdict_gate
 from cora.review._state import ReviewRun
 
 
@@ -447,6 +448,13 @@ async def produce_output(run: ReviewRun) -> ReviewResult | None:  # noqa: PLR091
     # post would leave a red required check standing for a verdict the
     # gate no longer holds. May rewrite `run.verdict`/`run.body_to_post`.
     await apply_ci_verdict_gate(run)
+
+    # Retraction-verdict gate (#38): the CI gate handles blockers CI
+    # disproves; this one handles blockers the model disproves itself.
+    # Runs after it and reads the possibly-rewritten verdict, so a
+    # review the CI gate already downgraded is a no-op here rather than
+    # a second step down.
+    apply_retraction_verdict_gate(run)
 
     _finalize_observability(
         run,

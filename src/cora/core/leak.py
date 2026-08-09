@@ -342,6 +342,20 @@ def _is_retracted(span: str) -> bool:
     return not _RETRACTION_CONTRAST_RE.search(span, m.end())
 
 
+def count_blocker_retractions(review_text: str) -> tuple[int, int]:
+    """`(total_blocker_bullets, retracted_count)` for one review body.
+
+    Exposes what `detect_blocker` computes internally so the verdict
+    path can act on it too (cora #38). `detect_blocker` answers "pause
+    automerge?" and already discounts retracted bullets — but the
+    VERDICT line was left alone, so a review whose every Blocker
+    retracts still posted 🔴 `needs changes`. Same split the CI gate
+    draws, and the same whole-review rule applies there: one retracted
+    bullet among several live ones changes nothing."""
+    spans = _blocker_bullet_spans(review_text)
+    return len(spans), sum(1 for span in spans if _is_retracted(span))
+
+
 def detect_blocker(
     review_text: str,
     *,
