@@ -8,6 +8,8 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-08-09
+
 ### Added
 - **`list_files` — a path-existence tool for deep mode** (#36).
   `grep_repo` matches file *content*; its `glob` only narrows which
@@ -599,7 +601,9 @@ evolution summarised below and in the module docstrings.
   embed the `Authorization` header value; header values are redacted and
   the message is length-capped.
 
-[Unreleased]: https://github.com/imlach/cora/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/imlach/cora/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/imlach/cora/compare/v0.1.5...v0.1.6
+[0.1.5]: https://github.com/imlach/cora/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/imlach/cora/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/imlach/cora/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/imlach/cora/compare/v0.1.1...v0.1.2
