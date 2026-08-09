@@ -44,6 +44,7 @@ _T1_SUCCESS_REASON = {
     "wall_hit": "t1-continuation",
     "verdict_trigger": "t1-verdict-trigger",
     "spiral_exhausted": "t1-spiral-escalation",
+    "no_tool_use": "t1-no-tool-use-retry",
 }
 
 # Every `terminated_reason` that means "the posted body came from T1" —
@@ -119,6 +120,13 @@ class KvContinuationConnector(EscalationConnector):
             gha_log(
                 f"T0 exhausted its spiral re-draw; resuming the committed "
                 f"trajectory on T1 `{t1_model}` "
+                f"(max_iterations={t1_max_iterations}, "
+                f"budget_s={t1_budget_s:.0f})"
+            )
+        elif tag == "no_tool_use":
+            gha_log(
+                f"T0 verdicted with zero tool calls (unverified by "
+                f"construction); re-running fresh on T1 `{t1_model}` "
                 f"(max_iterations={t1_max_iterations}, "
                 f"budget_s={t1_budget_s:.0f})"
             )
