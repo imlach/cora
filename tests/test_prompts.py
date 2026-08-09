@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from cora.config import ReviewerConfig
-from cora.core.prompt import load_system_prompt
+from cora.core.prompt import add_required_initial_tool_contract, load_system_prompt
 
 # The post-processor (leak detector + verdict→conclusion mapping) parses
 # these exact strings — a packaged prompt that drifts them silently breaks
@@ -47,6 +47,16 @@ def test_config_prompt_paths_default_to_none():
     cfg = ReviewerConfig()
     assert cfg.deep_prompt_path is None
     assert cfg.quick_prompt_path is None
+
+
+def test_required_initial_tool_contract_is_opt_in_prompt_addition():
+    base = load_system_prompt(None, mode="deep")
+    assert "Required initial tool call" not in base
+    enforced = add_required_initial_tool_contract(base)
+    assert enforced.startswith(base.rstrip())
+    assert "make at least one targeted repository-context" in enforced
+    assert "tool call and use its successful result" in enforced
+    assert "ceremonial or irrelevant" in enforced
 
 
 def test_deep_prompt_pins_unverified_finding_rules():

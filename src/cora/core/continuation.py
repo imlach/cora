@@ -159,6 +159,7 @@ def _reconcile_unprocessed_tool_calls(
             tool_name=getattr(p, "tool_name", "") or "",
             content=_UNPROCESSED_TOOL_STUB,
             tool_call_id=getattr(p, "tool_call_id", "") or "",
+            outcome="failed",
         )
         for p in dangling
     ]
@@ -246,7 +247,13 @@ async def continue_on_t1(
     from pydantic_ai import ModelSettings, UsageLimits
     from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 
-    from cora.core.agent import AgentConfig, Deps, make_review_agent
+    from cora.core.agent import (
+        AgentConfig,
+        Deps,
+        first_successful_tool_name,
+        initial_tool_contract_satisfied,
+        make_review_agent,
+    )
     from cora.core.loop_logging import (
         PerCallTimeoutExceeded,
         ReasoningSpiralDetected,
@@ -301,6 +308,11 @@ async def continue_on_t1(
 
     mcp_allowed_for_filter = allowed_tools - {"grep_repo", "git_show"}
 
+    contract_armed = bool(
+        cfg is not None
+        and cfg.require_initial_tool_call
+        and first_successful_tool_name(prior_messages) is None
+    )
     config = AgentConfig(
         endpoint_base_url=endpoint_base_url,
         api_key=llm_gateway_key,
@@ -313,6 +325,7 @@ async def continue_on_t1(
         ),
         retries=1,
         session_id=cfg.session_header if cfg is not None else None,
+        require_initial_tool_call=contract_armed,
     )
     agent = make_review_agent(config)
 
@@ -376,6 +389,12 @@ async def continue_on_t1(
     stream_on = cfg is not None and cfg.stream_detection
     result = None
     messages: list = []
+    if contract_armed and not tools_available:
+        gha_log(
+            f"agent_review iter pr_number={pr_number} phase=T1 "
+            "event=initial_tool_contract outcome=no_tools first_tool=none"
+        )
+        return "", "required-tool-unavailable", tools_available
 
     # Two entry shapes:
     #   - resume: prior_messages non-empty → _CONTINUATION_PROMPT framing
@@ -685,6 +704,10 @@ async def continue_on_t1(
 
         salvage = _spiral.extract_final_text(messages)
         if salvage.strip():
+            if contract_armed and not initial_tool_contract_satisfied(
+                messages, gha_log=gha_log, pr_number=pr_number, phase="T1"
+            ):
+                return "", "required-tool-unhonored", tools_available
             gha_log(
                 f"T1 re-draw did not recover (PR #{pr_number}) — posting "
                 f"the truncated turn ({len(salvage)} chars)"
@@ -716,6 +739,10 @@ async def continue_on_t1(
     )
 
     body = result.output if isinstance(result.output, str) else str(result.output)
+    if contract_armed and not initial_tool_contract_satisfied(
+        messages, gha_log=gha_log, pr_number=pr_number, phase="T1"
+    ):
+        return "", "required-tool-unhonored", tools_available
     return body, None, tools_available
 
 

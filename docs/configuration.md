@@ -36,7 +36,8 @@ for the Anthropic/Bedrock topology.
 | `AGENT_REVIEW_T2_MODEL` | Model alias for T2 second opinion |
 | `AGENT_REVIEW_T2_MAX_ITERATIONS` | Iteration cap for T2 second opinion |
 | `AGENT_REVIEW_SKIP_T0` | Starts directly on T1 when set to `true` |
-| `CORA_ESCALATION_TRIGGERS` | CSV of escalation triggers for the default ladder (`wall_hit`, `blocker`, `low_confidence`; default `wall_hit`) |
+| `CORA_ESCALATION_TRIGGERS` | CSV of escalation triggers for the default ladder (`wall_hit`, `blocker`, `low_confidence`, `no_tool_use`; default `wall_hit`) |
+| `CORA_REQUIRE_INITIAL_TOOL_CALL` | Require one successful repository-context tool call before a deep verdict can post; ignored T0 constraints retry fresh on T1, then fail closed (default `false`; quick mode unchanged) |
 | `AGENT_REVIEW_PER_CALL_TIMEOUT_S` | Per-model-call timeout |
 | `AGENT_REVIEW_MAX_COMPLETION_TOKENS` | Per-call completion ceiling for the deep tier legs (T0/T1). Size it so one draw finishes inside `AGENT_REVIEW_PER_CALL_TIMEOUT_S` at your backend's generation rate — a draw that can't is cancelled mid-generation and records nothing |
 | `AGENT_REVIEW_SPIRAL_REDRAW` | Defaults to `true`; set `false` to disable the one-shot re-send when a turn hits the completion ceiling without committing to a tool call or a verdict |

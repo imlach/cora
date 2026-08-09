@@ -391,6 +391,10 @@ DEFAULT_T1_CONTINUATION = False
 # calls. Mirrored as
 # `ReviewerConfig.escalation_triggers` (CSV env `CORA_ESCALATION_TRIGGERS`).
 DEFAULT_ESCALATION_TRIGGERS: frozenset[str] = frozenset({"wall_hit"})
+# Deep-review grounding contract. Off in the reusable engine so existing
+# adopters keep their current provider behaviour; deployments opt in after
+# confirming their OpenAI-compatible backend supports tool_choice="required".
+REQUIRE_INITIAL_TOOL_CALL = False
 # LiteLLM alias the T1 continuation dispatches to (the larger-context
 # T1 endpoint).
 DEFAULT_T1_MODEL = "core"

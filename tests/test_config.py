@@ -40,6 +40,8 @@ def test_defaults_mirror_engine_constants():
     assert d.propose_patch_dispatch == c.DEFAULT_PROPOSE_PATCH_DISPATCH
     assert d.propose_patch_dispatch is False
     assert d.patch_escalation == c.DEFAULT_PATCH_ESCALATION
+    assert d.require_initial_tool_call == c.REQUIRE_INITIAL_TOOL_CALL
+    assert d.require_initial_tool_call is False
     assert d.classifier_label == c.DEFAULT_CLASSIFIER_LABEL
     assert d.wall_time_override_s is None
     assert d.context_injection == c.CONTEXT_INJECTION_ENABLED
@@ -108,6 +110,7 @@ def test_from_env_empty_is_safe():
     assert fe.t1_model == c.DEFAULT_T1_MODEL
     assert fe.t2_model == c.DEFAULT_T2_MODEL
     assert fe.skip_t0 is False
+    assert fe.require_initial_tool_call is False
     assert fe.propose_patch_dispatch is False
     assert fe.patch_escalation is True
     assert fe.context_injection is True
@@ -120,6 +123,13 @@ def test_from_env_empty_is_safe():
     assert fe.spiral_recovery is False  # spiral recovery opt-in stays off
 
 
+def test_from_env_required_initial_tool_call_opt_in():
+    assert ReviewerConfig.from_env(
+        {"CORA_REQUIRE_INITIAL_TOOL_CALL": "true"}
+    ).require_initial_tool_call is True
+    assert ReviewerConfig.from_env(
+        {"CORA_REQUIRE_INITIAL_TOOL_CALL": "false"}
+    ).require_initial_tool_call is False
 def test_from_env_spiral_escalation_killswitch():
     # Default-true killswitch: only the literal "false" (case-insensitive)
     # disables — same typo-safe parse as AGENT_REVIEW_SPIRAL_REDRAW.

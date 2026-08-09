@@ -411,6 +411,65 @@ def test_deep_wall_hit_continues_on_t1(monkeypatch):
     assert rep.complete_calls[0]["conclusion"] == "neutral"
 
 
+def test_required_tool_ignore_retries_fresh_on_t1(monkeypatch):
+    """A T0 verdict that ignored the runtime contract is discarded and T1
+    receives only the original prompt, with the same config enforcement."""
+    _patch_common(monkeypatch)
+    import cora.core.continuation as cont_mod
+    import cora.core.deep_review as deep_mod
+
+    t0_messages = [object()]
+
+    async def fake_deep(**kwargs):
+        assert kwargs["cfg"].require_initial_tool_call is True
+        assert "Required initial tool call" in kwargs["system_prompt"]
+        return "", "required-tool-unhonored", ["grep_repo"], t0_messages
+
+    seen: dict = {}
+
+    async def fake_t1(**kwargs):
+        seen.update(kwargs)
+        return "🟢 looks good\n\nVerified with repository context.", None, ["git_show"]
+
+    monkeypatch.setattr(deep_mod, "deep_review_call", fake_deep)
+    monkeypatch.setattr(cont_mod, "continue_on_t1", fake_t1)
+
+    cfg = _cfg(max_tool_iterations=12, require_initial_tool_call=True)
+    result = run_review(
+        cfg, reporter=RecordingReporter(), retrieval=NullRetrievalProvider()
+    )
+
+    assert seen["prior_messages"] == []
+    assert seen["initial_user_prompt"] is not None
+    assert result.terminated_reason == "t1-required-tool-retry"
+    assert result.verdict == "looks good"
+
+
+def test_required_tool_ignore_on_t1_fails_closed(monkeypatch):
+    """If both tiers ignore the contract, no unverified verdict posts."""
+    _patch_common(monkeypatch)
+    import cora.core.continuation as cont_mod
+    import cora.core.deep_review as deep_mod
+
+    async def fake_deep(**kwargs):
+        return "", "required-tool-unhonored", ["grep_repo"], [object()]
+
+    async def fake_t1(**kwargs):
+        return "", "required-tool-unhonored", ["grep_repo"]
+
+    monkeypatch.setattr(deep_mod, "deep_review_call", fake_deep)
+    monkeypatch.setattr(cont_mod, "continue_on_t1", fake_t1)
+
+    rep = RecordingReporter()
+    cfg = _cfg(max_tool_iterations=12, require_initial_tool_call=True)
+    result = run_review(cfg, reporter=rep, retrieval=NullRetrievalProvider())
+
+    assert result.terminated_reason == "required-tool-unhonored"
+    assert result.conclusion == "cancelled"
+    assert rep.reviews == []
+    assert "did not honor" in rep.skips[0]
+
+
 def test_deep_cfg_tier_fields_reach_t1_dispatch(monkeypatch):
     """Non-default `t1_model` / `t1_max_iterations` cfg values steer
     the T1 dispatch and the tiers_run trail — config, not env."""

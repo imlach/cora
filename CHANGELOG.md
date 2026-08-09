@@ -8,6 +8,21 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Added
+- **Enforceable deep-review grounding contract** (#51). Opt in with
+  `CORA_REQUIRE_INITIAL_TOOL_CALL=true` to constrain each model request with
+  `tool_choice="required"` (and serial tool execution) until the trajectory
+  contains a successful tool return. A provider that ignores the T0 constraint
+  gets one fresh T1 retry under the same contract; if T1 also ignores it, cora
+  discards the unverified body and posts a cancelled check-run. Structured
+  `initial_tool_contract` events expose satisfied, ignored, and no-tools
+  outcomes. Quick mode and default-off deployments are unchanged.
+
+### Fixed
+- Fresh T1 entries now actually discard T0 message history. The `no_tool_use`
+  retry was labelled and prompted as fresh but still carried the unverified T0
+  trajectory, anchoring the stronger tier on the claims it was meant to check.
+
 ## [0.1.8] - 2026-08-09
 
 ### Fixed

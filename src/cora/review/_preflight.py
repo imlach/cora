@@ -164,6 +164,10 @@ def preflight(run: ReviewRun) -> ReviewResult | None:
         )
         return run.skip_result("skipped (system prompt missing)", "prompt-missing")
     run.system_prompt = load_system_prompt(prompt_path, mode=run.mode, cfg=cfg)
+    if not run.is_quick and cfg.require_initial_tool_call:
+        from cora.core.prompt import add_required_initial_tool_contract
+
+        run.system_prompt = add_required_initial_tool_contract(run.system_prompt)
 
     try:
         metadata = _prc.fetch_pr_metadata(run.pr_number)

@@ -480,7 +480,12 @@ async def deep_review_call(
     from pydantic_ai import ModelSettings, UsageLimits
     from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 
-    from cora.core.agent import AgentConfig, Deps, make_review_agent
+    from cora.core.agent import (
+        AgentConfig,
+        Deps,
+        initial_tool_contract_satisfied,
+        make_review_agent,
+    )
 
     # No MCP URL configured → don't probe, don't register a toolset.
     # Deep mode runs on the in-process repo tools alone: a smaller tool
@@ -544,6 +549,9 @@ async def deep_review_call(
         # Tool-call retries on transient MCP failures.
         retries=1,
         session_id=cfg.session_header if cfg is not None else None,
+        require_initial_tool_call=(
+            cfg.require_initial_tool_call if cfg is not None else False
+        ),
     )
     agent = make_review_agent(config)
 
@@ -596,6 +604,13 @@ async def deep_review_call(
     # whether the run completes cleanly or trips `UsageLimitExceeded`
     # — the T1 continuation dispatcher reads this on a wall-hit.
     messages: list = []
+    contract_armed = config.require_initial_tool_call
+    if contract_armed and not tools_available:
+        gha_log(
+            f"agent_review iter pr_number={pr_number} phase=T0 "
+            "event=initial_tool_contract outcome=no_tools first_tool=none"
+        )
+        return "", "required-tool-unavailable", tools_available, messages
 
     # Terminal reason hoisted to outer scope so the inner wall-hit /
     # iteration-cap handlers can set it BEFORE the `async with`
@@ -1139,6 +1154,10 @@ async def deep_review_call(
 
         salvage = _spiral.extract_final_text(messages)
         if salvage.strip():
+            if contract_armed and not initial_tool_contract_satisfied(
+                messages, gha_log=gha_log, pr_number=pr_number, phase="T0"
+            ):
+                return "", "required-tool-unhonored", tools_available, messages
             gha_log(
                 f"deep mode re-draw did not recover (PR #{pr_number}) — "
                 f"posting the truncated turn ({len(salvage)} chars)"
@@ -1187,6 +1206,10 @@ async def deep_review_call(
     )
 
     body = result.output if isinstance(result.output, str) else str(result.output)
+    if contract_armed and not initial_tool_contract_satisfied(
+        messages, gha_log=gha_log, pr_number=pr_number, phase="T0"
+    ):
+        return "", "required-tool-unhonored", tools_available, messages
     return body, None, tools_available, messages
 
 

@@ -19,6 +19,15 @@ if TYPE_CHECKING:
 
 _PROMPT_MODES = ("deep", "quick")
 
+_REQUIRED_INITIAL_TOOL_CONTRACT = """\
+## Required initial tool call
+
+Before you may return a verdict, make at least one targeted repository-context
+tool call and use its successful result in your review. Choose the tool and
+query that resolve a real uncertainty in this PR; a ceremonial or irrelevant
+call does not satisfy this contract. If a tool fails, try a suitable targeted
+alternative before concluding."""
+
 
 def load_system_prompt(
     path: Path | None, *, mode: str, cfg: ReviewerConfig | None = None
@@ -41,6 +50,16 @@ def load_system_prompt(
     if mode not in _PROMPT_MODES:
         raise ValueError(f"unknown prompt mode: {mode!r} (expected 'deep' or 'quick')")
     return (files("cora") / "prompts" / f"{mode}.md").read_text(encoding="utf-8")
+
+
+def add_required_initial_tool_contract(prompt: str) -> str:
+    """Append the opt-in deep-review grounding contract to any prompt.
+
+    This applies equally to cora's packaged prompt and deployment overrides,
+    while leaving the default prompt byte-for-byte unchanged when the runtime
+    enforcement flag is off.
+    """
+    return f"{prompt.rstrip()}\n\n{_REQUIRED_INITIAL_TOOL_CONTRACT}\n"
 
 
 def assemble_initial_user_prompt(
