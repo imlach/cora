@@ -15,7 +15,6 @@ from cora.core.deep_review import _thinking_extra_body
 from cora.core.prompt import load_system_prompt
 from cora.core.retrieval import _cache_get, _cache_put, build_retrieval_query
 
-
 # ── Deps as the runtime carrier ──────────────────────────────────────
 
 

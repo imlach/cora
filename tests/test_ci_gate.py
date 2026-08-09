@@ -125,7 +125,7 @@ def test_annotate_contradicted_blockers_appends_note_only_to_matches():
     assert new_body.count("harness note") == 1
     # The unrelated (SQL injection) blocker is untouched.
     lines = new_body.splitlines()
-    sql_line = next(l for l in lines if "SQL injection" in l)
+    sql_line = next(ln for ln in lines if "SQL injection" in ln)
     assert "harness note" not in sql_line
 
 
@@ -322,8 +322,8 @@ def test_gate_annotates_but_does_not_downgrade_mixed_blockers(monkeypatch):
     assert result.body.startswith("🔴 needs changes")
     assert "harness note" in result.body
     lines = result.body.splitlines()
-    compile_line = next(l for l in lines if "won't compile" in l)
-    auth_line = next(l for l in lines if "authorization" in l)
+    compile_line = next(ln for ln in lines if "won't compile" in ln)
+    auth_line = next(ln for ln in lines if "authorization" in ln)
     assert "harness note" in compile_line
     assert "harness note" not in auth_line
 

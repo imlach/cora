@@ -14,7 +14,7 @@ it identically — same fail-soft contract, same log shape.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 # Probe-failure log lines cap the exception text — a malformed multi-line
 # credential once ballooned the message, and the tail adds no signal.

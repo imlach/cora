@@ -41,7 +41,6 @@ from urllib.parse import urlparse
 
 import httpx
 
-
 # Most recently captured `x-litellm-*` headers. Drained + cleared by
 # `drain_captured_headers()` after each `agent.run()`. Empty dict
 # means no LiteLLM response landed (either the endpoint isn't
@@ -69,10 +68,10 @@ _DEBUG = os.environ.get("LITELLM_CAPTURE_DEBUG", "") == "1"
 
 async def _capture_response(response: httpx.Response) -> None:
     """httpx response event hook — stash `x-litellm-*` headers."""
-    global _captured  # noqa: PLW0603 — last-write-wins bucket
+    global _captured
     if _DEBUG:
         # Lowercased keys, sorted for stable log diffing.
-        all_keys = sorted(k.lower() for k in response.headers.keys())
+        all_keys = sorted(k.lower() for k in response.headers)
         print(
             f"::debug::litellm_capture saw response headers: {all_keys}",
             flush=True,
@@ -115,7 +114,7 @@ def drain_captured_headers() -> dict[str, str]:
     whatever LiteLLM set on the final turn. Returns `{}` if nothing
     was captured (non-LiteLLM endpoint, or the call errored before a
     response landed)."""
-    global _captured  # noqa: PLW0603
+    global _captured
     headers = _captured
     _captured = {}
     return headers

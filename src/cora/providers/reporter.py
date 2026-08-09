@@ -38,7 +38,7 @@ from __future__ import annotations
 import os
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from cora.core.budget import Budget
@@ -139,7 +139,7 @@ class Reporter(ABC):
         `complete_check` on every terminal path that ran the review."""
 
     @abstractmethod
-    def post_review(self, result: "ReviewResult") -> None:
+    def post_review(self, result: ReviewResult) -> None:
         """Render the full review comment and finalise it as this run's
         comment (progress → verdict marker swap, or a fresh comment for
         quick mode), then collapse every other cora comment on the PR."""
@@ -182,7 +182,7 @@ class Reporter(ABC):
         `(ok, error_message)` like the engine helper."""
 
     @classmethod
-    def from_config(cls, cfg, *, started_at: datetime | None = None) -> "Reporter":
+    def from_config(cls, cfg, *, started_at: datetime | None = None) -> Reporter:
         """A GitHubReporter when the run has a repo + PR identity, else a
         NullReporter (dry-run / eval / no SCM)."""
         if cfg.repo and cfg.pr_number:
@@ -219,7 +219,7 @@ class NullReporter(Reporter):
     def write_summary(self, **_kwargs) -> None:
         return None
 
-    def post_review(self, result: "ReviewResult") -> None:
+    def post_review(self, result: ReviewResult) -> None:
         return None
 
     def post_skip(self, reason: str) -> None:
@@ -326,7 +326,7 @@ class GitHubReporter(Reporter):
     def post_in_progress(self) -> None:
         from cora.core.comment import create_progress_comment, make_initial_comment
 
-        started = self.started_at or datetime.now(timezone.utc)
+        started = self.started_at or datetime.now(UTC)
         with self._app_token_env():
             # Always a NEW comment for this run — never finds-or-edits a
             # leftover placeholder from a cancelled prior run. That one
@@ -395,7 +395,7 @@ class GitHubReporter(Reporter):
             tools_available,
         )
 
-    def post_review(self, result: "ReviewResult") -> None:
+    def post_review(self, result: ReviewResult) -> None:
         from cora.core.summary import make_review_comment
 
         body = make_review_comment(

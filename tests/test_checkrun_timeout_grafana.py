@@ -41,7 +41,7 @@ def _capture_patch_payload(monkeypatch, fail_first=False):
             self.stdout = '{"id": 1, "html_url": "https://x/checks/1"}'
             self.stderr = "boom" if rc else ""
 
-    def _fake_run(cmd, input=None, capture_output=None, text=None, env=None):  # noqa: A002
+    def _fake_run(cmd, input=None, capture_output=None, text=None, env=None):
         captured.append({
             "payload": json.loads(input),
             "gh_token": (env or {}).get("GH_TOKEN"),

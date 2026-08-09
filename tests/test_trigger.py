@@ -14,12 +14,12 @@ from cora.trigger import TriggerContext, TriggerPolicy, evaluate
 
 
 def _ctx(**overrides) -> TriggerContext:
-    base = dict(
-        author="mallory",
-        author_association="NONE",
-        labels=frozenset(),
-        is_fork=False,
-    )
+    base = {
+        "author": "mallory",
+        "author_association": "NONE",
+        "labels": frozenset(),
+        "is_fork": False,
+    }
     base.update(overrides)
     return TriggerContext(**base)
 

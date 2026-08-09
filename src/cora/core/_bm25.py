@@ -25,7 +25,6 @@ import re
 import zlib
 from collections import Counter
 
-
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
 # Shared modulus + BM25 defaults. ``avg_len`` is a rough corpus average

@@ -20,19 +20,19 @@ from cora.review import run_review
 from cora.trigger import TriggerContext, TriggerDecision, TriggerPolicy
 
 __all__ = [
-    "run_review",
-    "ReviewerConfig",
-    "ReviewResult",
-    "RetrievalProvider",
+    "EscalationConnector",
+    "EscalationPolicy",
     "GitProvider",
     "Reporter",
-    "EscalationPolicy",
-    "EscalationConnector",
     "ReprefillConnector",
+    "RetrievalProvider",
+    "ReviewResult",
+    "ReviewerConfig",
     "Tier",
-    "TriggerPolicy",
     "TriggerContext",
     "TriggerDecision",
+    "TriggerPolicy",
+    "run_review",
 ]
 try:
     # Written by the hatch-vcs build hook (per-commit versions so a

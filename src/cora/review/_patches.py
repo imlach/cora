@@ -33,7 +33,7 @@ def _is_self_authored(login: str | None, expected: str) -> bool:
     return normalised == expected or normalised.startswith(expected + "@")
 
 
-async def dispatch_patches(run: ReviewRun) -> None:  # noqa: PLR0915
+async def dispatch_patches(run: ReviewRun) -> None:
     """Parse + act on the model's propose_patch directive, then append
     the dispatch outcome to `run.body_to_post`. Never returns a skip —
     every failure degrades to a footer line."""

@@ -61,11 +61,10 @@ import hashlib
 import json
 import os
 import subprocess
-from typing import Callable
+from collections.abc import Callable
 
 from cora.core.config import CHECK_RUN_NAME, DIFF_CHAR_CAP
 from cora.core.pr_context import fetch_pr_diff, gather_ci_context
-
 
 # Per-injection wall-time extension (seconds). Each injection adds work
 # the model didn't budget for — give it room to act on the new context
@@ -386,10 +385,10 @@ class ContextRefresher:
         # Stable across re-runs (the started_at moves but we don't
         # hash that) and across name re-ordering.
         signature = sorted(
-            (
+
                 (cr.get("name") or "", cr.get("status") or "", cr.get("conclusion") or "")
                 for cr in check_runs
-            )
+
         )
         sig_hash = hashlib.sha256(
             json.dumps(signature, sort_keys=True).encode("utf-8")
@@ -423,7 +422,7 @@ class ContextRefresher:
         )
 
     def _all_relevant_settled(
-        self, signature: "list[tuple[str, str, str]]"
+        self, signature: list[tuple[str, str, str]]
     ) -> bool:
         """True when every relevant check has finished, whatever the
         outcome. Distinguishes "CI is done and clean" from "one check

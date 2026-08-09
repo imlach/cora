@@ -5,6 +5,7 @@ picks GitHub vs Null on review identity."""
 from __future__ import annotations
 
 import os
+from datetime import UTC
 
 import pytest
 
@@ -345,7 +346,7 @@ def test_github_complete_check_defaults_zero_budget(monkeypatch):
 
 
 def test_github_post_in_progress_renders_then_posts(monkeypatch):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     posted = {}
     seen = {}
@@ -359,7 +360,7 @@ def test_github_post_in_progress_renders_then_posts(monkeypatch):
         "cora.core.comment.create_progress_comment",
         lambda repo, pr, body: posted.update({"repo": repo, "pr": pr, "body": body}),
     )
-    started = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    started = datetime(2026, 6, 1, tzinfo=UTC)
     GitHubReporter("o/r", "7", started_at=started).post_in_progress()
     assert seen["args"] == ("7", started)
     assert posted == {"repo": "o/r", "pr": "7", "body": "INITIAL"}

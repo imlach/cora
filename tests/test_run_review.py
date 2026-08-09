@@ -11,11 +11,12 @@ and the SIGTERM-guard idempotency that replaced the old `done` flag.
 from __future__ import annotations
 
 import time
+from typing import ClassVar
 
 import cora.core.pr_context as prc_mod
-import cora.review._output as output_mod
 import cora.core.pretrigger as pretrigger_mod
 import cora.review as review_mod
+import cora.review._output as output_mod
 from cora.config import ReviewerConfig
 from cora.core.budget import Budget
 from cora.providers.reporter import NullReporter, Reporter
@@ -121,13 +122,13 @@ def _metadata() -> dict:
 
 
 def _cfg(**overrides) -> ReviewerConfig:
-    base = dict(
-        repo="owner/repo",
-        pr_number="42",
-        llm_api_key="test-key",
-        model="test-model",
-        max_tool_iterations=0,
-    )
+    base = {
+        "repo": "owner/repo",
+        "pr_number": "42",
+        "llm_api_key": "test-key",
+        "model": "test-model",
+        "max_tool_iterations": 0,
+    }
     base.update(overrides)
     return ReviewerConfig(**base)
 
@@ -485,7 +486,7 @@ class _SpiralResponse:
     tail `committed_prefix` drops before the T1 handoff."""
 
     kind = "response"
-    parts: list = []
+    parts: ClassVar[list] = []
 
 
 def test_deep_spiral_exhausted_escalates_to_t1(monkeypatch):

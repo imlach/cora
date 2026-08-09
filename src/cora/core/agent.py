@@ -17,8 +17,9 @@ code doesn't know or care.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from cora.config import ReviewerConfig
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 SESSION_HEADER = "x-review-session"
 
 
-def _default_reviewer_config() -> "ReviewerConfig":
+def _default_reviewer_config() -> ReviewerConfig:
     """Default-construct a `ReviewerConfig` lazily — the import happens at
     first `Deps()` construction, not at module load, so `cora.core.agent`
     never participates in an import cycle with the `cora` package root."""
@@ -80,7 +81,7 @@ class Deps:
     # a fresh `ReviewerConfig()`, whose field defaults mirror those
     # constants by reference — so a Deps built without an explicit
     # config behaves identically to one built with the defaults.
-    cfg: "ReviewerConfig" = field(default_factory=_default_reviewer_config)
+    cfg: ReviewerConfig = field(default_factory=_default_reviewer_config)
 
 
 # Construction-time Agent parameters. Kept separate from `Deps`

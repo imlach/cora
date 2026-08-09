@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from cora.config import ReviewerConfig
 
 
-def _resolve_dep_source_roots(cfg: "ReviewerConfig", repo_root: Path) -> list[Path]:
+def _resolve_dep_source_roots(cfg: ReviewerConfig, repo_root: Path) -> list[Path]:
     """`DEP_SOURCE_ROOTS`, existence-validated; auto-detects in-repo
     vendored trees when unset.
 
@@ -118,7 +118,7 @@ class GitProvider(ABC):
         )
 
     @classmethod
-    def from_config(cls, cfg: "ReviewerConfig") -> "GitProvider":
+    def from_config(cls, cfg: ReviewerConfig) -> GitProvider:
         """`LocalGitProvider` is the only implementation today (serves the
         in-CI checkout). An SCM-API-backed provider would branch here."""
         return LocalGitProvider(

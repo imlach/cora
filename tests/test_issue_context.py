@@ -17,8 +17,8 @@ from cora.core.issue_context import (
     fetch_issue,
     format_issue_context_block,
     local_read_issue,
-    parse_linked_issues,
     neutralize_boundary_tags,
+    parse_linked_issues,
     wrap_issue_context_block,
 )
 

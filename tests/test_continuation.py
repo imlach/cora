@@ -71,7 +71,7 @@ def test_continuation_module_imports_cleanly():
     import sys
 
     sys.modules.pop("cora.core.continuation", None)
-    import cora.core.continuation  # noqa: F401
+    import cora.core.continuation
 
     # Sanity: the public surface exposes `continue_on_t1`.
     assert hasattr(cora.core.continuation, "continue_on_t1")
@@ -89,8 +89,8 @@ def test_continue_on_t1_returns_loaded_tool_palette_on_success():
     return path: stub the agent factory + the MCP probe, return a
     fake `result` with the expected `output` / `usage()` shape.
     """
-    import sys
     import asyncio
+    import sys
     from types import SimpleNamespace
     from unittest.mock import patch
 
@@ -215,8 +215,8 @@ def test_continue_on_t1_respects_max_iterations_override():
     the function actually uses the kwarg rather than ignoring it
     in favour of the default 6.
     """
-    import sys
     import asyncio
+    import sys
     from types import SimpleNamespace
     from unittest.mock import patch
 
@@ -321,8 +321,8 @@ def test_continue_on_t1_fresh_start_uses_initial_prompt():
     `_CONTINUATION_PROMPT` regardless of inputs, which would lead T1
     to recap a non-existent prior conversation.
     """
-    import sys
     import asyncio
+    import sys
     from types import SimpleNamespace
     from unittest.mock import patch
 
@@ -427,8 +427,8 @@ def test_continue_on_t1_resume_still_uses_continuation_prompt():
     `initial_user_prompt` is also provided (defensive — caller
     shouldn't pass both, but if they do, resume wins).
     """
-    import sys
     import asyncio
+    import sys
     from types import SimpleNamespace
     from unittest.mock import patch
 

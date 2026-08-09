@@ -19,13 +19,13 @@ tests actually use.
 """
 
 # Re-exports for backward compat with pre-rename downstream tests.
+from cora.core.leak import (  # noqa: F401
+    detect_reasoning_leak,
+    parse_verdict_from_body,
+)
 from cora.core.patch_dispatch import (  # noqa: F401
     _format_suggestion_body,
     _is_in_hunk,
     find_line_range,
     parse_pr_diff_hunks,
-)
-from cora.core.leak import (  # noqa: F401
-    detect_reasoning_leak,
-    parse_verdict_from_body,
 )

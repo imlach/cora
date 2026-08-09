@@ -10,8 +10,8 @@ from __future__ import annotations
 import json
 import time
 
-from cora.core.budget import Budget
 from cora.core import config as _c
+from cora.core.budget import Budget
 from cora.core.leak import (
     build_leak_retry_messages,
     detect_blocker,
@@ -152,7 +152,7 @@ def _finalize_observability(
     )
 
 
-async def produce_output(run: ReviewRun) -> ReviewResult | None:  # noqa: PLR0915
+async def produce_output(run: ReviewRun) -> ReviewResult | None:
     """The output pipeline: reasoning-leak handling (strip → detect →
     one retry turn), the observability trail (finish line, tool-counter
     trace, leak preview), second-opinion composition, and the verdict

@@ -36,7 +36,7 @@ def test_quick_review_uses_configured_output_cap(monkeypatch):
     )
     monkeypatch.setattr(
         "cora.core.litellm_capture.drain_captured_headers",
-        lambda: {},
+        dict,
     )
 
     budget = Budget(max_input=0, max_output=0, max_iterations=0)

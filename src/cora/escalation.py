@@ -55,7 +55,7 @@ ESCALATE_TRIGGERS = frozenset({"wall_hit", "blocker", "low_confidence"})
 
 
 def escalation_triggers(
-    result: "ReviewResult", *, blocker_word: str = "needs changes"
+    result: ReviewResult, *, blocker_word: str = "needs changes"
 ) -> frozenset[str]:
     """Which escalation triggers a tier's result trips (independent of any
     policy). The policy intersects this with its `escalate_on` set.
@@ -104,7 +104,7 @@ class EscalationContext:
     entries (`classifier_large_start` / per-call fresh start) map onto
     `entry="fresh"` with a distinguishing `tag`."""
 
-    next_tier: "Tier"
+    next_tier: Tier
     prev_context: list
     initial_user_prompt: str | None
     entry: str = "wall_hit"
@@ -186,7 +186,7 @@ class EscalationPolicy:
             raise ValueError(f"unknown escalation triggers: {sorted(unknown)}")
 
     @classmethod
-    def single(cls, model: str, *, max_iterations: int = 0) -> "EscalationPolicy":
+    def single(cls, model: str, *, max_iterations: int = 0) -> EscalationPolicy:
         """No escalation — one tier. The adopter default."""
         return cls(tiers=[Tier(model=model, max_iterations=max_iterations)])
 
@@ -196,7 +196,7 @@ class EscalationPolicy:
 
     def should_escalate(
         self,
-        result: "ReviewResult",
+        result: ReviewResult,
         from_index: int,
         *,
         blocker_word: str = "needs changes",

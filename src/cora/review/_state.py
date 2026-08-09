@@ -44,7 +44,7 @@ def loki_push(line: str, labels: dict | None = None) -> None:
     _pkg._loki_push(line, labels)
 
 
-def _eval_dump(cfg: "ReviewerConfig", filename: str, content: str) -> None:
+def _eval_dump(cfg: ReviewerConfig, filename: str, content: str) -> None:
     """Write `content` under the eval output dir. Soft-fail — eval-mode
     runs aren't load-bearing for a real PR."""
     try:
@@ -60,11 +60,11 @@ class ReviewRun:
     """Everything one review accumulates, phase by phase."""
 
     # ── construction (build_run) ────────────────────────────────────
-    cfg: "ReviewerConfig"
-    reporter: "Reporter"
-    retrieval: "RetrievalProvider"
-    git: "GitProvider"
-    second_opinion: "SecondOpinionProvider"
+    cfg: ReviewerConfig
+    reporter: Reporter
+    retrieval: RetrievalProvider
+    git: GitProvider
+    second_opinion: SecondOpinionProvider
     eval_mode: bool
     started_at: datetime
     pr_number: str

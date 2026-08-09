@@ -30,9 +30,9 @@ def test_is_uncommitted_draw_truth_table():
     from cora.core.spiral import is_uncommitted_draw
 
     def draw(**kw):
-        base = dict(
-            finish_reason="length", tool_calls=0, text="", has_verdict=_has_verdict
-        )
+        base = {
+            "finish_reason": "length", "tool_calls": 0, "text": "", "has_verdict": _has_verdict
+        }
         return is_uncommitted_draw(**{**base, **kw})
 
     # The signature itself: ceiling hit, nothing committed.
@@ -355,7 +355,7 @@ def _wire(monkeypatch, agent, *, spiral_turn=2):
         "cora.core.loop_logging.iter_with_turn_logging", _iter_spirals
     )
     monkeypatch.setattr(
-        "cora.core.litellm_capture.drain_captured_headers", lambda: {}
+        "cora.core.litellm_capture.drain_captured_headers", dict
     )
 
 
@@ -511,10 +511,10 @@ def test_killswitch_disarms_detection_entirely(monkeypatch):
         "cora.core.loop_logging.iter_with_turn_logging", _iter_records
     )
     monkeypatch.setattr(
-        "cora.core.litellm_capture.drain_captured_headers", lambda: {}
+        "cora.core.litellm_capture.drain_captured_headers", dict
     )
 
-    body, reason, _tools, _messages = _run_deep(
+    _body, reason, _tools, _messages = _run_deep(
         ReviewerConfig.from_env({"AGENT_REVIEW_SPIRAL_REDRAW": "false"})
     )
     assert reason is None

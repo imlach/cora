@@ -24,7 +24,8 @@ policy scoping.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Sequence
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any
 
 from cora.core import config as _c
 from cora.core.leak import (
@@ -49,7 +50,7 @@ class T2SecondOpinion(SecondOpinionProvider):
     opinion."""
 
     def should_dispatch(
-        self, *, cfg: "ReviewerConfig", is_quick: bool, primary_body: str | None
+        self, *, cfg: ReviewerConfig, is_quick: bool, primary_body: str | None
     ) -> bool:
         # The dispatch gate: opt-in via `cfg.t2_disagreement` (default
         # off), deep mode, a primary body was produced,
@@ -66,7 +67,7 @@ class T2SecondOpinion(SecondOpinionProvider):
     async def dispatch(
         self,
         *,
-        cfg: "ReviewerConfig",
+        cfg: ReviewerConfig,
         endpoint_base_url: str,
         api_key: str,
         system_prompt: str,
@@ -80,11 +81,11 @@ class T2SecondOpinion(SecondOpinionProvider):
         mcp_actions_url: str | None,
         mcp_actions_headers: dict[str, str] | None,
         web_fetch_url: str | None,
-        git: "GitProvider | None",
+        git: GitProvider | None,
         log: Callable[[str], None],
         iter_log: Callable[[str], None],
         primary_terminated_reason: str | None = None,
-        extra_sessions: "Sequence[McpServerSpec]" = (),
+        extra_sessions: Sequence[McpServerSpec] = (),
     ) -> SecondOpinionResult:
         # Resolve the alias once — the disagreement dispatch, its composition
         # banner, and the patch-escalation verifier all route to the same
@@ -153,7 +154,7 @@ class T2SecondOpinion(SecondOpinionProvider):
         self,
         *,
         result: SecondOpinionResult,
-        cfg: "ReviewerConfig",
+        cfg: ReviewerConfig,
         is_quick: bool,
         primary_body_to_post: str,
         primary_terminated_reason: str | None,
@@ -246,7 +247,7 @@ class T2SecondOpinion(SecondOpinionProvider):
         self,
         *,
         result: SecondOpinionResult,
-        cfg: "ReviewerConfig",
+        cfg: ReviewerConfig,
         is_quick: bool,
         pr_number: str,
         iter_log: Callable[[str], None],

@@ -21,7 +21,7 @@ _PROMPT_MODES = ("deep", "quick")
 
 
 def load_system_prompt(
-    path: Path | None, *, mode: str, cfg: "ReviewerConfig | None" = None
+    path: Path | None, *, mode: str, cfg: ReviewerConfig | None = None
 ) -> str:
     """Return the system-prompt text for `mode` ("deep" | "quick").
 

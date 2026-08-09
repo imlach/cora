@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 
+from cora.config import ReviewerConfig
 from cora.core.kv_continuation import KvContinuationConnector
 from cora.escalation import (
     EscalationContext,
@@ -24,18 +25,17 @@ from cora.escalation import (
     ReprefillConnector,
     Tier,
 )
-from cora.review import _default_policy, _continuation_tier_runner
-from cora.config import ReviewerConfig
+from cora.review import _continuation_tier_runner, _default_policy
 
 
 def _cfg(**overrides) -> ReviewerConfig:
-    base = dict(
-        repo="owner/repo",
-        pr_number="42",
-        llm_api_key="test-key",
-        model="test-model",
-        max_tool_iterations=0,
-    )
+    base = {
+        "repo": "owner/repo",
+        "pr_number": "42",
+        "llm_api_key": "test-key",
+        "model": "test-model",
+        "max_tool_iterations": 0,
+    }
     base.update(overrides)
     return ReviewerConfig(**base)
 
@@ -365,6 +365,6 @@ def test_t1_terminated_reasons_covers_every_entry_path():
         T1_TERMINATED_REASONS,
     )
 
-    assert T1_TERMINATED_REASONS == frozenset(_T1_SUCCESS_REASON.values())
+    assert frozenset(_T1_SUCCESS_REASON.values()) == T1_TERMINATED_REASONS
     assert "t1-verdict-trigger" in T1_TERMINATED_REASONS
     assert "t1-per-call-retry" in T1_TERMINATED_REASONS

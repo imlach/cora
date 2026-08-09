@@ -41,7 +41,6 @@ from typing import Literal
 
 from cora.core.config import VERDICT_WORDS
 
-
 # Verdict order. Higher = more concerning — rank is the word's index in
 # the (ascending-concern) verdict vocabulary, `config.VERDICT_WORDS` by
 # default: looks good=0, minor=1, needs changes=2. The mapper in

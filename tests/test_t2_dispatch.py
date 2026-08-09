@@ -9,8 +9,6 @@ loop machinery.
 """
 from __future__ import annotations
 
-
-
 # ---------------------------------------------------------------- composition
 
 

@@ -30,7 +30,8 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Awaitable, Callable, TypeVar
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
 
 T = TypeVar("T")
 
@@ -126,7 +127,7 @@ async def run_with_rate_limit_backoff(
     while True:
         try:
             return await fn()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if not _is_rate_limit(exc):
                 raise
             attempt += 1

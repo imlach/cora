@@ -71,7 +71,7 @@ def _finalize_check_on_signal() -> None:
         print(f"::warning::SIGTERM check finalize failed: {exc}")
 
 
-def _on_sigterm(signum, frame):  # noqa: ARG001
+def _on_sigterm(signum, frame):
     """Finalize the in-progress check-run on a hard kill, then re-raise
     SIGTERM with default disposition so the process exits. Must stay
     cheap (one PATCH) to fit GHA's SIGTERM→SIGKILL grace window."""

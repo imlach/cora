@@ -5,7 +5,6 @@ table holds for every combination the dispatcher will hand it.
 """
 from __future__ import annotations
 
-
 from cora.core.disagreement import (
     Resolution,
     TierVerdict,

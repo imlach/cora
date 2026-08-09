@@ -14,7 +14,6 @@ from functools import lru_cache
 from cora.core.config import VERDICT_GLYPHS, VERDICT_WORDS
 from cora.core.log import _gha_log
 
-
 # How much of the body to search for the structured-output Verdict marker.
 # 600 chars is enough for any reasonable prose preamble between the agent
 # loop's "produce the response now" nudge and the model's actual verdict.
@@ -189,7 +188,7 @@ def build_leak_retry_messages(
     """
     body_for_retry = (leaked_body or "")[:_LEAK_RETRY_BODY_CHAR_CAP]
     marker_lines = "".join(
-        f"  {glyph} {word}\n" for glyph, word in zip(glyphs, words)
+        f"  {glyph} {word}\n" for glyph, word in zip(glyphs, words, strict=False)
     )
     instruction = (
         "Your previous PR-review response analysed the change but did "
@@ -415,7 +414,7 @@ def _verdict_to_conclusion_map(words: tuple[str, ...]) -> dict[str, str]:
     # Lowercased keys — `parse_verdict_from_body` lowercases the
     # captured word before lookup, and the default words are already
     # lowercase.
-    return {w.lower(): c for w, c in zip(words, _CONCLUSIONS)}
+    return {w.lower(): c for w, c in zip(words, _CONCLUSIONS, strict=False)}
 
 
 def parse_verdict_from_body(
@@ -478,7 +477,7 @@ _REVIEW_EVENTS = ("COMMENT", "COMMENT", "REQUEST_CHANGES")
 
 @lru_cache(maxsize=8)
 def _verdict_to_review_event_map(words: tuple[str, ...]) -> dict[str, str]:
-    return {w.lower(): e for w, e in zip(words, _REVIEW_EVENTS)}
+    return {w.lower(): e for w, e in zip(words, _REVIEW_EVENTS, strict=False)}
 
 
 def verdict_to_review_event(

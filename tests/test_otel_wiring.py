@@ -13,7 +13,6 @@ import importlib
 
 import pytest
 
-
 # The OTel SDK + OTLP/gRPC exporter ship via the optional `otel`
 # extra. The local test venv may or may not have them — skip the
 # whole module rather than fail-skip per-test when they're absent.

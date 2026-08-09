@@ -26,10 +26,6 @@ the openai client, so the capture path runs through a custom
 
 from __future__ import annotations
 
-from collections import Counter
-from dataclasses import dataclass, field
-
-
 # Client-side per-call cap on a single LLM completion. MUST be ≥
 # the gateway's longest single-leg per-model timeout (180s in the
 # reference deployment) so the openai client doesn't give up on a
@@ -41,6 +37,9 @@ from dataclasses import dataclass, field
 # also bumping the outer workflow timeout — the iteration budget
 # halves otherwise.
 import os as _os
+from collections import Counter
+from dataclasses import dataclass, field
+
 PER_CALL_TIMEOUT_S = int(_os.environ.get("AGENT_REVIEW_PER_CALL_TIMEOUT_S", "180"))
 
 # One-time additional budget for the FIRST T0 model call, to absorb a
@@ -90,7 +89,7 @@ class Budget:
     litellm_headers: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def from_config(cls, cfg) -> "Budget":
+    def from_config(cls, cfg) -> Budget:
         """Construct the per-review Budget from a `ReviewerConfig`'s caps
         (`max_input_tokens` / `max_output_tokens` / `max_tool_iterations`).
         Duck-typed to keep this module free of a `cora.config` import —

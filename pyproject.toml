@@ -54,7 +54,12 @@ otel = [
 ]
 dev = [
     "pytest",
-    "ruff",
+    # Pinned, not floating. ruff's DEFAULT rule set widens between
+    # releases, so an unpinned dev dep meant `ruff check .` reported a
+    # different set of rules on every machine and every CI run — 251
+    # findings had accumulated against a lint nobody could reproduce.
+    # Bump deliberately, with the diff that comes with it.
+    "ruff==0.16.2",
     "build",
 ]
 
@@ -75,6 +80,35 @@ packages = ["src/cora"]
 [tool.ruff]
 src = ["src", "tests"]
 target-version = "py311"
+
+# Explicit selection, so the enabled set is a decision rather than
+# whatever this ruff version happens to default to.
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "PIE", "SIM", "RUF", "TRY", "BLE"]
+ignore = [
+    # House style, deliberately kept:
+    # Comments and docstrings are wrapped by hand for readability;
+    # code lines run long where breaking them would hurt. 143 hits, none
+    # of them a readability problem worth a reflow of the whole tree.
+    "E501",
+    # `raise RuntimeError(f"command failed (rc={rc}): ...")` is the
+    # idiom throughout — the message IS the diagnostic. 50 hits.
+    "TRY003",
+    # En-dashes, arrows and box-drawing in prose comments are
+    # intentional; they are what makes the module docstrings readable.
+    "RUF001", "RUF002", "RUF003",
+    # `try: ... except X: pass` is the engine's soft-fail idiom, and each
+    # site carries a comment saying why the failure is tolerated.
+    # `contextlib.suppress` would hide that comment inside a `with`.
+    "SIM105",
+    # Wants TypeError where the code raises ValueError/RuntimeError on a
+    # type check. Swapping an exception type is a behaviour change for
+    # anyone catching it — out of scope for a lint-enablement change.
+    "TRY004",
+    # `return` inside `try` rather than `else`. Pure style, and moving
+    # returns out of the try block reads worse where the try is short.
+    "TRY300",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

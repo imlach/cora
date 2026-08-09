@@ -71,8 +71,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Callable
-
+from collections.abc import Callable
+from typing import Any
 
 # `(line: str) -> None` — written by the caller's combined-emit
 # wrapper that prints to GHA + pushes to Loki.
@@ -387,13 +387,14 @@ async def iter_with_turn_logging(
     (`UsageLimitExceeded`, `WallTimeExceeded`, `PerCallTimeoutExceeded`,
     `asyncio.TimeoutError` → break-marker log + return).
     """
-    from pydantic_ai._agent_graph import ModelRequestNode, CallToolsNode
+    from pydantic_ai._agent_graph import CallToolsNode, ModelRequestNode
     from pydantic_ai.messages import (
         TextPart,
         ThinkingPart,
         ToolCallPart,
         UserPromptPart,
     )
+
     # Imported lazily here so the module-level import of loop_logging
     # (used by triage callers that don't construct a refresher) doesn't
     # pull pr_context's subprocess imports until actually needed.
@@ -475,7 +476,7 @@ async def iter_with_turn_logging(
                     )
                 except StopAsyncIteration:
                     break
-                except asyncio.TimeoutError:
+                except TimeoutError as timeout_exc:
                     partial = "".join(text_parts)
                     _emit(
                         pr_number=pr_number,
@@ -488,12 +489,16 @@ async def iter_with_turn_logging(
                         text_tokens=text_deltas,
                         salvaged_chars=len(partial),
                     )
+                    # Chain the TimeoutError: the stall IS that timeout,
+                    # and keeping the cause makes the traceback say where
+                    # the wait expired rather than starting at the domain
+                    # exception.
                     raise StreamStallDetected(
                         turn,
                         idle_s=stall_timeout_s,
                         streamed_tokens=thinking_deltas + text_deltas,
                         partial_text=partial,
-                    )
+                    ) from timeout_exc
                 kind = _delta_kind(event)
                 if kind == "thinking":
                     thinking_deltas += 1
@@ -549,7 +554,7 @@ async def iter_with_turn_logging(
                         agent_iter.__anext__(),
                         timeout=step_cap,
                     )
-                except asyncio.TimeoutError as exc:
+                except TimeoutError as exc:
                     raise PerCallTimeoutExceeded(
                         turn=turn_at_call,
                         elapsed_s=time.monotonic() - step_start,
@@ -635,9 +640,12 @@ async def iter_with_turn_logging(
                 # trivial next step isn't wrapped a second time.
                 model_call_count += 1
                 step_cap = per_call_timeout_s
-                if step_cap is not None:
-                    if model_call_count == 1 and first_call_extra_timeout_s:
-                        step_cap += first_call_extra_timeout_s
+                if (
+                    step_cap is not None
+                    and model_call_count == 1
+                    and first_call_extra_timeout_s
+                ):
+                    step_cap += first_call_extra_timeout_s
                 stream_start = time.monotonic()
                 try:
                     coro = _consume_stream(node, turn=turn_counter[0])
@@ -645,7 +653,7 @@ async def iter_with_turn_logging(
                         await asyncio.wait_for(coro, timeout=step_cap)
                     else:
                         await coro
-                except asyncio.TimeoutError as exc:
+                except TimeoutError as exc:
                     raise PerCallTimeoutExceeded(
                         turn=turn_counter[0],
                         elapsed_s=time.monotonic() - stream_start,

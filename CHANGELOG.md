@@ -73,6 +73,22 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   pinned test documents that. The durable fix is upstream, in what the
   model emits; #38 stays open for it.
 ### Changed
+- **ruff runs in CI, pinned, against an explicit rule set.** It was in
+  the dev extra unpinned and never run by CI, so 251 findings had
+  accumulated against a lint nobody could reproduce — ruff's *default*
+  rule set widens between releases, so two machines on different
+  versions disagreed about what was even being checked. Now: `ruff`
+  pinned exactly, an explicit `select` (`E F W I UP B C4 PIE SIM RUF
+  TRY BLE`), and a documented `ignore` for the five rules that fight
+  deliberate house style (`E501`, `TRY003`, `RUF001`-`003`) plus three
+  that would change behaviour or add churn (`SIM105`, `TRY004`,
+  `TRY300`). The tree is clean at zero findings; a `ruff` job runs
+  alongside `pytest` on every PR. The sweep itself is mechanical —
+  import sorting, PEP-604 annotations, `zip(..., strict=False)` (chosen
+  over `strict=True` precisely because it preserves today's behaviour)
+  — plus nine hand fixes, including a real one: a `StreamStallDetected`
+  raised inside `except TimeoutError` now chains its cause, so the
+  traceback says where the wait expired.
 - **Prompts: look it up, don't remember it** (#44, both modes). The old
   rule capped unverifiable third-party claims at ⚠️ **Concern**, which
   the model satisfied by shipping the same wrong claim one severity

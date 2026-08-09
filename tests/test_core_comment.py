@@ -22,8 +22,6 @@ from cora.core import comment as comment_mod
 from cora.core.config import (
     COMMENT_MARKER,
     LEGACY_COMMENT_MARKERS,
-    PROGRESS_MARKER_PREFIX,
-    VERDICT_MARKER_PREFIX,
 )
 
 

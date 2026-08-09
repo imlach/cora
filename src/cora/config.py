@@ -168,7 +168,7 @@ class ReviewerConfig:
     # used verbatim instead of the t1_* fields above. Tier 0 describes the
     # primary review tier and should agree with `model` /
     # `max_tool_iterations`. None → build the default ladder from t1_*.
-    escalation_policy: "EscalationPolicy | None" = None
+    escalation_policy: EscalationPolicy | None = None
     t2_disagreement: bool = _c.DEFAULT_T2_DISAGREEMENT
     t2_model: str = _c.DEFAULT_T2_MODEL
     t2_max_iterations: int = _c.DEFAULT_T2_MAX_ITERATIONS
@@ -329,7 +329,7 @@ class ReviewerConfig:
         return self.t0_wall_time_s + self.t1_wall_time_s + self.post_headroom_s
 
     @classmethod
-    def from_env(cls, environ: dict[str, str] | None = None) -> "ReviewerConfig":
+    def from_env(cls, environ: dict[str, str] | None = None) -> ReviewerConfig:
         """Build a config from the workflow environment.
 
         The env wiring for a CI-workflow deployment: every supported

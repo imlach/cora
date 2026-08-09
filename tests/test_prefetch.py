@@ -7,7 +7,6 @@ in the reference deployment's live CI workflow.
 
 from __future__ import annotations
 
-
 from cora.core.prefetch import (
     extract_release_url,
     format_release_notes_block,

@@ -40,6 +40,7 @@ import subprocess
 
 from cora.core.propose_patch import propose_patch_branch_name
 
+
 def parse_pr_diff_hunks(diff_text: str) -> dict[str, list[tuple[int, int]]]:
     """Parse a unified diff (from `gh pr diff`) into per-path hunk ranges.
 
@@ -108,10 +109,7 @@ def _is_in_hunk(
     """True if `[start_line, end_line]` (inclusive) is fully within a
     single hunk's `[h_start, h_end)` range. Edits that cross hunk
     boundaries fall back to the draft-PR path."""
-    for h_start, h_end in hunks:
-        if start_line >= h_start and end_line < h_end:
-            return True
-    return False
+    return any(start_line >= h_start and end_line < h_end for h_start, h_end in hunks)
 
 
 def _gh_api_with_token(
@@ -127,7 +125,7 @@ def _gh_api_with_token(
     """
     env = os.environ.copy()
     env["GH_TOKEN"] = gh_token
-    cmd = ["gh", "api"] + args
+    cmd = ["gh", "api", *args]
     if input_data is not None:
         cmd += ["--input", "-"]
     proc = subprocess.run(
