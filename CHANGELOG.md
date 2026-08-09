@@ -8,6 +8,14 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Fixed
+- **`no_tool_use` escalation died at the finish line.** The 0.1.7
+  trigger's first live firing escalated correctly, T1 produced a
+  verdict, and then `_T1_SUCCESS_REASON[tag]` raised `KeyError:
+  'no_tool_use'` — cancelling the review. The connector now maps the
+  tag (`t1-no-tool-use-retry`), logs its own entry line, and a
+  regression test pins every driver entry tag to a mapped reason.
+
 ## [0.1.7] - 2026-08-09
 
 ### Added

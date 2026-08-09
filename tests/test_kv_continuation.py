@@ -368,3 +368,23 @@ def test_t1_terminated_reasons_covers_every_entry_path():
     assert frozenset(_T1_SUCCESS_REASON.values()) == T1_TERMINATED_REASONS
     assert "t1-verdict-trigger" in T1_TERMINATED_REASONS
     assert "t1-per-call-retry" in T1_TERMINATED_REASONS
+
+
+def test_every_tiers_entry_tag_has_a_t1_success_reason():
+    """Every `tag` the review driver can hand the connector must be a
+    `_T1_SUCCESS_REASON` key. The first live `no_tool_use` escalation
+    (cora 0.1.7) reached the finish line and died on exactly this:
+    `_T1_SUCCESS_REASON[tag]` KeyError'd, cancelling a review whose T1
+    had already produced a verdict."""
+    from cora.core.kv_continuation import _T1_SUCCESS_REASON
+
+    # The complete tag vocabulary emitted by _tiers.py's entry mapping.
+    tags = {
+        "classifier_large",
+        "per_call_fresh",
+        "wall_hit",
+        "verdict_trigger",
+        "spiral_exhausted",
+        "no_tool_use",
+    }
+    assert tags <= set(_T1_SUCCESS_REASON)
