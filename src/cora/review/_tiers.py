@@ -24,6 +24,7 @@ from cora.escalation import (
     EscalationContext,
     EscalationPolicy,
     Tier,
+    escalation_triggers,
     run_escalation,
 )
 from cora.result import ReviewResult
@@ -426,6 +427,15 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
             prev_context = committed_prefix(t0_messages)
         elif run.terminated_reason in WALL_HIT_REASONS:
             entry, tag = "wall_hit", "wall_hit"
+        elif "no_tool_use" in (
+            escalation_triggers(_t0_interim, blocker_word=cfg.verdict_words[2])
+            & policy.escalate_on
+        ):
+            # A deep T0 that verdicted without touching a tool: the
+            # trajectory is unverified assertion, so resuming it would
+            # anchor T1 on the very claims that need checking. Start
+            # fresh, like the per-call fresh-start path.
+            entry, tag = "fresh", "no_tool_use"
         else:
             # blocker / low_confidence: T0 completed — resume its
             # trajectory so the stronger tier re-examines the findings.

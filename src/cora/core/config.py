@@ -384,9 +384,11 @@ DEFAULT_WALL_TIME_S = DEFAULT_T0_WALL_TIME_S + DEFAULT_T1_WALL_TIME_S + POST_HEA
 DEFAULT_T1_CONTINUATION = False
 # Which triggers escalate T0→T1 when the ladder has a T1 rung. Must be a
 # subset of `cora.escalation.ESCALATE_TRIGGERS` ({"wall_hit", "blocker",
-# "low_confidence"}). `wall_hit` alone is the continuation behaviour; add
-# `blocker` / `low_confidence` to have a stronger model double-check a
-# needs-changes or no-verdict outcome. Mirrored as
+# "low_confidence", "no_tool_use"}). `wall_hit` alone is the continuation
+# behaviour; add `blocker` / `low_confidence` to have a stronger model
+# double-check a needs-changes or no-verdict outcome, and `no_tool_use` to
+# re-run (fresh, on T1) a deep review that verdicted without any tool
+# calls. Mirrored as
 # `ReviewerConfig.escalation_triggers` (CSV env `CORA_ESCALATION_TRIGGERS`).
 DEFAULT_ESCALATION_TRIGGERS: frozenset[str] = frozenset({"wall_hit"})
 # LiteLLM alias the T1 continuation dispatches to (the larger-context
