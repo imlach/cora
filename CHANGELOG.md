@@ -8,6 +8,8 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-08-09
+
 ### Added
 - **Enforceable deep-review grounding contract** (#51). Opt in with
   `CORA_REQUIRE_INITIAL_TOOL_CALL=true` to constrain each model request with
