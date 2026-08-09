@@ -22,14 +22,21 @@ from cora.escalation import (
 from cora.result import ReviewResult
 
 
-def _result(*, verdict="looks good", terminated_reason=None) -> ReviewResult:
+def _result(
+    *, verdict="looks good", terminated_reason=None, mode="deep", tool_calls=1
+) -> ReviewResult:
+    # One tool call by default — the normal shape of a deep review; pass
+    # tool_calls=0 to model a review that verdicted without using tools.
+    budget = Budget(max_input=0, max_output=0, max_iterations=0)
+    if tool_calls:
+        budget.tool_calls["grep_repo"] = tool_calls
     return ReviewResult(
         verdict=verdict,
         verdict_line=None,
         conclusion="success",
         body="b",
-        mode="deep",
-        budget=Budget(max_input=0, max_output=0, max_iterations=0),
+        mode=mode,
+        budget=budget,
         wall_time_s=1.0,
         terminated_reason=terminated_reason,
     )
@@ -72,6 +79,29 @@ def test_triggers_map_verdict_states():
     assert escalation_triggers(_result(verdict="looks good")) == frozenset()
     # infra-ish terminated_reason that isn't a wall-hit doesn't trip wall_hit
     assert escalation_triggers(_result(terminated_reason="mcp-connect-failed")) == frozenset()
+
+
+def test_no_tool_use_trips_only_for_deep_zero_call_reviews():
+    # deep + zero tool calls → unverified by construction
+    assert "no_tool_use" in escalation_triggers(_result(tool_calls=0))
+    # combines with, not replaces, the verdict triggers
+    assert escalation_triggers(
+        _result(verdict="needs changes", tool_calls=0)
+    ) == frozenset({"blocker", "no_tool_use"})
+    # any tool use at all → not tripped
+    assert "no_tool_use" not in escalation_triggers(_result(tool_calls=1))
+    # quick mode never has tools, so zero calls is not a signal
+    assert escalation_triggers(_result(mode="quick", tool_calls=0)) == frozenset()
+
+
+def test_no_tool_use_escalates_when_opted_in():
+    two = [Tier("t0"), Tier("t1")]
+    pol = EscalationPolicy(tiers=two, escalate_on=frozenset({"no_tool_use"}))
+    assert pol.should_escalate(_result(tool_calls=0), 0) is True
+    assert pol.should_escalate(_result(tool_calls=3), 0) is False
+    # not opted in → tripped trigger is ignored
+    wall = EscalationPolicy(tiers=two, escalate_on=frozenset({"wall_hit"}))
+    assert wall.should_escalate(_result(tool_calls=0), 0) is False
 
 
 def test_should_escalate_requires_trigger_in_policy_and_a_higher_tier():

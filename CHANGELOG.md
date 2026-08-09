@@ -8,6 +8,17 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Added
+- **`no_tool_use` escalation trigger.** A deep review can verdict without
+  making a single tool call — observed on the same PR, same prompt, same
+  model drawing a 0-call review that *asserted* verification and a 35-call
+  review that performed it. A 0-call deep verdict is unverified by
+  construction, so the new trigger escalates it to T1 with a **fresh**
+  entry (resuming the trajectory would anchor the stronger tier on the
+  unverified claims — same framing as the per-call fresh-start path).
+  Quick mode is exempt: it runs without tools by design. Opt in via
+  `CORA_ESCALATION_TRIGGERS=wall_hit,no_tool_use`; off by default.
+
 ## [0.1.6] - 2026-08-09
 
 ### Added

@@ -49,9 +49,15 @@ WALL_HIT_REASONS = frozenset(
 )
 
 # The triggers a policy can escalate on. `wall_hit` is the deep-mode
-# default; the other two let an adopter escalate a small model to a larger
-# one to double-check a blocker / a no-verdict outcome.
-ESCALATE_TRIGGERS = frozenset({"wall_hit", "blocker", "low_confidence"})
+# default; `blocker` / `low_confidence` let an adopter escalate a small
+# model to a larger one to double-check a blocker / a no-verdict outcome.
+# `no_tool_use` catches a deep review that verdicted without a single tool
+# call — under identical inputs the same model can produce a 0-call review
+# asserting "I confirmed X" and a 35-call review actually confirming it, so
+# a 0-call deep verdict is unverified by construction.
+ESCALATE_TRIGGERS = frozenset(
+    {"wall_hit", "blocker", "low_confidence", "no_tool_use"}
+)
 
 
 def escalation_triggers(
@@ -70,6 +76,10 @@ def escalation_triggers(
         hits.add("blocker")
     if result.verdict is None:
         hits.add("low_confidence")
+    # Deep mode only: quick mode runs without tools, so zero calls is its
+    # normal shape, not a signal.
+    if result.mode == "deep" and not sum(result.budget.tool_calls.values()):
+        hits.add("no_tool_use")
     return frozenset(hits)
 
 
