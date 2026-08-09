@@ -210,6 +210,30 @@ def test_per_call_fresh_seeds_prompt(monkeypatch):
     assert t1_kwargs["initial_user_prompt"] == "review this PR"
 
 
+def test_fresh_entry_discards_prior_trajectory(monkeypatch):
+    """Fresh means fresh even when T0 left messages behind. In particular,
+    the no-tool retry must not anchor T1 on T0's unverified verdict."""
+    t1_kwargs: dict = {}
+    extra, _ = _extra(
+        monkeypatch,
+        t1_kwargs=t1_kwargs,
+        t1_return=("🟢 ok\n\nVerified.", None, []),
+    )
+    prev = [object()]
+    ctx = _ctx(
+        extra,
+        entry="fresh",
+        tag="no_tool_use",
+        terminated_reason=None,
+        prev=prev,
+    )
+
+    asyncio.run(KvContinuationConnector().escalate(ctx, _never))
+
+    assert t1_kwargs["prior_messages"] == []
+    assert t1_kwargs["initial_user_prompt"] == "review this PR"
+
+
 def test_no_t1_body_preserves_t0_reason(monkeypatch):
     """T1 also fails: the connector returns an empty body and hands back
     T0's `terminated_reason` so the original wall-hit isn't masked."""
@@ -386,5 +410,6 @@ def test_every_tiers_entry_tag_has_a_t1_success_reason():
         "verdict_trigger",
         "spiral_exhausted",
         "no_tool_use",
+        "required_tool",
     }
     assert tags <= set(_T1_SUCCESS_REASON)

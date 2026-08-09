@@ -295,6 +295,10 @@ class ReviewerConfig:
 
     # ── Feature flags / dev knobs ────────────────────────────────────
     enable_thinking: bool = False
+    # Require a successful repository-context tool call before a deep
+    # verdict can post. The model is constrained with tool_choice="required"
+    # until the first successful return; quick mode is unchanged.
+    require_initial_tool_call: bool = _c.REQUIRE_INITIAL_TOOL_CALL
     # No-op since the validate-any-claim framing became the prompt
     # default (it was this flag's teacher-trajectory variant). Accepted
     # so existing REVIEWER_BROADEN_TOOLS deployments keep working.
@@ -421,6 +425,9 @@ class ReviewerConfig:
             otel_endpoint=get("OTEL_EXPORTER_OTLP_ENDPOINT"),
             otel_service_version=get("OTEL_SERVICE_VERSION"),
             enable_thinking=getbool("AGENT_REVIEW_ENABLE_THINKING", False),
+            require_initial_tool_call=getbool(
+                "CORA_REQUIRE_INITIAL_TOOL_CALL", _c.REQUIRE_INITIAL_TOOL_CALL
+            ),
             broaden_tools=getbool("REVIEWER_BROADEN_TOOLS", False),
             transcript_dir=get("REVIEWER_TRANSCRIPT_DIR"),
             transcript_source=getalias(

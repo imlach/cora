@@ -156,6 +156,51 @@ class AgentConfig:
     # and nothing changes.
     session_id: str | None = None
 
+    # Deep-review grounding contract. While no successful tool return exists
+    # in the current trajectory, each model request is constrained to one
+    # required tool call. Off by default for backwards compatibility.
+    require_initial_tool_call: bool = False
+
+
+def first_successful_tool_name(messages: list) -> str | None:
+    """Return the first successfully completed tool in a trajectory."""
+    for message in messages:
+        for part in getattr(message, "parts", ()) or ():
+            if getattr(part, "part_kind", None) != "tool-return":
+                continue
+            if getattr(part, "outcome", None) != "success":
+                continue
+            return str(getattr(part, "tool_name", "unknown") or "unknown")
+    return None
+
+
+def required_initial_tool_model_settings(ctx):
+    """Require one serial tool call until the trajectory has a success.
+
+    Pydantic AI invokes agent-level model-settings callables before every
+    request, so the constraint automatically relaxes after the first tool
+    return without coupling the policy to any particular tool name.
+    """
+    from pydantic_ai import ModelSettings
+
+    if first_successful_tool_name(list(ctx.messages)) is not None:
+        return ModelSettings()
+    return ModelSettings(tool_choice="required", parallel_tool_calls=False)
+
+
+def initial_tool_contract_satisfied(
+    messages: list, *, gha_log: Callable[[str], None], pr_number: str, phase: str
+) -> bool:
+    """Log the contract outcome and return whether a tool succeeded."""
+    first_tool = first_successful_tool_name(messages)
+    outcome = "satisfied" if first_tool is not None else "required_ignored"
+    gha_log(
+        f"agent_review iter pr_number={pr_number} phase={phase} "
+        f"event=initial_tool_contract outcome={outcome} "
+        f"first_tool={first_tool or 'none'}"
+    )
+    return first_tool is not None
+
 
 def make_review_agent(config: AgentConfig, deps_type: type = Deps):
     """Build a Pydantic-AI Agent from the supplied config.
@@ -238,6 +283,11 @@ def make_review_agent(config: AgentConfig, deps_type: type = Deps):
         system_prompt=config.system_prompt,
         output_type=str,
         retries=config.retries,
+        model_settings=(
+            required_initial_tool_model_settings
+            if config.require_initial_tool_call
+            else None
+        ),
         tools=tuple(config.local_tools),
         toolsets=toolsets or None,
     )

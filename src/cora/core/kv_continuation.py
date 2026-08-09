@@ -23,6 +23,7 @@ on the context distinguishes the three entry paths so the finish-line
   - wall-hit resume         → ``t1-continuation``
   - large-diff direct start → ``t1-classifier-large``
   - per-call fresh start    → ``t1-per-call-retry``
+  - required-tool retry     → ``t1-required-tool-retry``
   - verdict-trigger resume  → ``t1-verdict-trigger``
   - exhausted-spiral resume → ``t1-spiral-escalation``
 """
@@ -45,6 +46,7 @@ _T1_SUCCESS_REASON = {
     "verdict_trigger": "t1-verdict-trigger",
     "spiral_exhausted": "t1-spiral-escalation",
     "no_tool_use": "t1-no-tool-use-retry",
+    "required_tool": "t1-required-tool-retry",
 }
 
 # Every `terminated_reason` that means "the posted body came from T1" —
@@ -130,6 +132,13 @@ class KvContinuationConnector(EscalationConnector):
                 f"(max_iterations={t1_max_iterations}, "
                 f"budget_s={t1_budget_s:.0f})"
             )
+        elif tag == "required_tool":
+            gha_log(
+                f"T0 ignored the required initial tool call; re-running "
+                f"fresh on T1 `{t1_model}` with the same constraint "
+                f"(max_iterations={t1_max_iterations}, "
+                f"budget_s={t1_budget_s:.0f})"
+            )
         else:
             gha_log(
                 f"T0 wall-hit ({ctx.terminated_reason}); escalating to T1 "
@@ -142,7 +151,10 @@ class KvContinuationConnector(EscalationConnector):
             llm_gateway_key=x["llm_gateway_key"],
             t1_model_alias=t1_model,
             system_prompt=x["system_prompt"],
-            prior_messages=self.handoff(ctx.prev_context),
+            # A fresh entry must not carry the prior tier's messages. The
+            # no-tool-use retry previously claimed to restart but still sent
+            # the unverified T0 trajectory, anchoring T1 on those claims.
+            prior_messages=[] if is_fresh else self.handoff(ctx.prev_context),
             # Fresh-start paths get the initial prompt as the first turn; the
             # wall-hit path passes None and keeps the resume framing.
             initial_user_prompt=ctx.initial_user_prompt if is_fresh else None,
@@ -193,16 +205,22 @@ class KvContinuationConnector(EscalationConnector):
                 tools=t1_tools,
                 tier_ran=t1_model,
             )
-        # T1 also failed; keep the T0 result + terminated_reason for the
-        # finalize path so the original wall-hit isn't masked.
+        # T1 also failed. Normally preserve the original T0 wall-hit, but a
+        # failed grounding contract is the terminal reason the finalize path
+        # must see so an unverified T0 body can never post.
+        final_reason = (
+            t1_terminated
+            if (t1_terminated or "").startswith("required-tool-")
+            else ctx.terminated_reason
+        )
         gha_log(
             f"T1 continuation produced no body "
             f"(reason: {t1_terminated or 'unknown'}); keeping "
-            f"T0 terminated_reason={ctx.terminated_reason}"
+            f"final terminated_reason={final_reason}"
         )
         return EscalationOutcome(
             body="",
-            terminated_reason=ctx.terminated_reason,
+            terminated_reason=final_reason,
             tools=[],
             tier_ran=t1_model,
         )

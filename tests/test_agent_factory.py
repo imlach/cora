@@ -8,7 +8,13 @@ from __future__ import annotations
 
 import pytest
 
-from cora.core.agent import AgentConfig, Deps, make_review_agent
+from cora.core.agent import (
+    AgentConfig,
+    Deps,
+    first_successful_tool_name,
+    make_review_agent,
+    required_initial_tool_model_settings,
+)
 
 pytest.importorskip("pydantic_ai")
 
@@ -63,6 +69,66 @@ def test_agent_config_minimum_required_fields():
     )
     assert c.mcp_servers == []  # default empty list
     assert c.retries == 1
+    assert c.require_initial_tool_call is False
+
+
+def test_required_initial_tool_settings_relax_after_success():
+    """The first request is serial + tool-required; a successful return
+    relaxes later turns back to the provider default."""
+    from types import SimpleNamespace
+
+    required = required_initial_tool_model_settings(SimpleNamespace(messages=[]))
+    assert required["tool_choice"] == "required"
+    assert required["parallel_tool_calls"] is False
+
+    failed = SimpleNamespace(
+        messages=[
+            SimpleNamespace(
+                parts=[
+                    SimpleNamespace(
+                        part_kind="tool-return",
+                        tool_name="grep_repo",
+                        outcome="failed",
+                    )
+                ]
+            )
+        ]
+    )
+    assert required_initial_tool_model_settings(failed)["tool_choice"] == "required"
+
+    missing_outcome = SimpleNamespace(
+        messages=[
+            SimpleNamespace(
+                parts=[
+                    SimpleNamespace(
+                        part_kind="tool-return",
+                        tool_name="grep_repo",
+                    )
+                ]
+            )
+        ]
+    )
+    assert (
+        required_initial_tool_model_settings(missing_outcome)["tool_choice"]
+        == "required"
+    )
+
+    succeeded = SimpleNamespace(
+        messages=[
+            SimpleNamespace(
+                parts=[
+                    SimpleNamespace(
+                        part_kind="tool-return",
+                        tool_name="git_show",
+                        outcome="success",
+                    )
+                ]
+            )
+        ]
+    )
+    relaxed = required_initial_tool_model_settings(succeeded)
+    assert "tool_choice" not in relaxed
+    assert first_successful_tool_name(succeeded.messages) == "git_show"
 
 
 def test_make_review_agent_returns_pydantic_ai_agent():

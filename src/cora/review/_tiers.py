@@ -380,6 +380,7 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
         cfg.spiral_escalation
         and run.terminated_reason == "agent-loop-errored: spiral-redraw-exhausted"
     )
+    required_tool_retry = run.terminated_reason == "required-tool-unhonored"
     # Parse the T0 verdict up front so the blocker / low_confidence
     # triggers see it; the final parse for the posted comment happens
     # later on whichever tier's body wins.
@@ -407,6 +408,7 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
         or skip_t0_start
         or run.per_call_fresh_start
         or spiral_escalation
+        or required_tool_retry
     ):
         # Hand off to the escalation connector. The default deep-mode
         # policy selects the trajectory-resume `KvContinuationConnector`;
@@ -419,6 +421,11 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
             entry, tag = "fresh", "classifier_large"
         elif run.per_call_fresh_start:
             entry, tag = "fresh", "per_call_fresh"
+        elif required_tool_retry:
+            # The provider returned a verdict despite tool_choice="required".
+            # Discard that unverified trajectory and retry once on T1 with
+            # the same runtime constraint.
+            entry, tag = "fresh", "required_tool"
         elif spiral_escalation:
             # Resume the committed trajectory — the tool work T0 banked
             # before spiralling is real; only the spiralled draw itself
@@ -516,6 +523,36 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
         return run.skip_result(
             "skipped (MCP server unreachable)",
             "mcp-connect-failed",
+            budget=budget,
+            wall_time_s=time.monotonic() - start,
+            tiers_run=run.tiers_run,
+        )
+    if run.terminated_reason and run.terminated_reason.startswith(
+        "required-tool-"
+    ):
+        unavailable = run.terminated_reason == "required-tool-unavailable"
+        detail = (
+            "No repository-context tools were available."
+            if unavailable
+            else "The review model did not honor the required initial tool call."
+        )
+        print(f"::warning::{detail} Posting a cancelled check-run")
+        try:
+            run.reporter.post_skip(
+                f"{detail} Review will retry on the next push."
+            )
+        except Exception as post_exc:  # noqa: BLE001
+            print(f"::warning::could not post skip comment: {post_exc}")
+        run.reporter.complete_check(
+            verdict_line="skipped (required initial tool call not completed)",
+            conclusion="cancelled",
+            budget=budget,
+            wall_time_s=time.monotonic() - start,
+            terminated_reason=run.terminated_reason,
+        )
+        return run.skip_result(
+            "skipped (required initial tool call not completed)",
+            run.terminated_reason,
             budget=budget,
             wall_time_s=time.monotonic() - start,
             tiers_run=run.tiers_run,
