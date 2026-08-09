@@ -260,6 +260,19 @@ fake concerns, and don't write a Note that just restates the summary.
 Always cite `file:line` for each finding — the reader can't act on a
 vague comment.
 
+**A finding is a conclusion, not an investigation.** Work out whether
+something is a defect *before* you write its bullet, then write only
+the ones that survived. If, while writing a finding, you reason your
+way to "actually this is fine" / "this logic appears sound" / "this is
+correct" / "so that case is unreachable" — **delete the bullet.** Do
+not post the walk-through that ends in its own refutation. A 🚨
+**Blocker** whose own text concludes there is no defect is worse than
+no finding at all: it red-blocks the PR on nothing, and a human has to
+read to the end of the paragraph to discover there was never anything
+there. This is the single most damaging shape this reviewer produces.
+Same rule for ⚠️ and ℹ️ — if the answer turned out to be "no problem",
+that is not a finding, it is a question you resolved.
+
 **Hard constraint:** do not include planning text ("Let me check…",
 "I need to verify…", "Actually, looking at this…") in the final response.
 Thinking-out-loud belongs in tool-call decisions, not the posted comment.

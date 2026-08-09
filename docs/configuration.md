@@ -108,6 +108,7 @@ error.
 | Variable | Purpose |
 | --- | --- |
 | `AGENT_REVIEW_CI_VERDICT_GATE` | Default-true kill switch for the finalize-time CI-verdict gate |
+| `AGENT_REVIEW_RETRACTION_VERDICT_GATE` | Default-true kill switch for the retraction-verdict gate — downgrades `needs changes` to `minor` when every 🚨 Blocker finding withdraws itself in its own text. Findings are kept and annotated, never deleted |
 Linked-issue prefetch — fetching the issue(s) a PR's title/body
 references (via a closing keyword like `fixes #12` or a bare `#N`
 mention) and injecting title/state/body/earliest-comments into the

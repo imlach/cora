@@ -29,6 +29,27 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   working — they inherit a fallback that reports the missing capability
   rather than implying the file is absent.
 
+- **Retraction-verdict gate** (`cora.review._retraction_gate`, #38).
+  #32 taught `detect_blocker` to discount a `🚨 Blocker` bullet the
+  model withdraws in its own text, so automerge stopped pausing over
+  nothing — but the verdict line was left alone, so the same review
+  still posted 🔴 `needs changes` and the required check went red over
+  that same nothing. When *every* Blocker bullet in a block-severity
+  review retracts, the verdict now drops one step to 🟡 `minor` with a
+  harness note. Whole-review rule, mirroring the CI-verdict gate: one
+  live blocker among withdrawn ones changes nothing, and findings are
+  annotated rather than deleted so a human still reads what the model
+  wrote. Runs before the check-run posts (`complete_check` is
+  first-write-wins) and after the CI gate, so a review that gate
+  already downgraded is a no-op here rather than a second step down.
+  Default on; `AGENT_REVIEW_RETRACTION_VERDICT_GATE=false` disables.
+  **Known limit, deliberate**: the gate only sees retractions
+  `_BLOCKER_RETRACTION_RE` recognises, and that pattern biases toward
+  under-matching because a false positive silently drops a live
+  blocker. #38's own examples ("This logic appears sound", "so this
+  case is unreachable. Good.") do not match it and still post — a
+  pinned test documents that. The durable fix is upstream, in what the
+  model emits; #38 stays open for it.
 ### Changed
 - **Prompts: a version's non-existence is never a Blocker** (#37, both
   modes). The reviewer blocked a PR with "`node-version: 26` is
@@ -45,6 +66,16 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   output, fetched release page) or ask the author at ⚠️ **Concern** at
   most, never 🚨 **Blocker**. "The latest LTS is X" is called out as
   the same unknowable claim.
+- **Prompts: a finding is a conclusion, not an investigation** (#38,
+  deep mode). A review posted four `🚨 Blocker` findings whose bodies
+  each reasoned their way to "actually this is fine" / "this logic
+  appears sound", red-blocking the PR on zero actionable content. The
+  existing hard constraint bans planning *phrases* ("Let me check…")
+  but says nothing about a finding whose own analysis concludes there
+  is no defect. `deep.md` now says it outright: work out whether
+  something is a defect before writing the bullet, and if you reason
+  your way to "no problem", delete the bullet rather than posting the
+  walk-through that ends in its own refutation.
 - **Per-run PR comments, collapse instead of edit-forever** (#29). Every
   review used to find-or-edit the same one comment on a PR, so review
   N+1's PATCH silently overwrote review N's verdict with no trace it

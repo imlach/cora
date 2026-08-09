@@ -197,6 +197,7 @@ class ReviewerConfig:
     # compile/test-failure claim pattern get annotated (and the verdict
     # downgraded one step) when CI already passed. Default-on kill switch.
     ci_verdict_gate: bool = _c.CI_VERDICT_GATE_ENABLED
+    retraction_verdict_gate: bool = _c.RETRACTION_VERDICT_GATE_ENABLED
 
     # ── Per-bundle caps ──────────────────────────────────────────────
     diff_char_cap: int = _c.DIFF_CHAR_CAP
@@ -502,6 +503,10 @@ class ReviewerConfig:
             ),
             # Finalize-time CI-verdict gate — default-true kill switch.
             ci_verdict_gate=getflag_on("AGENT_REVIEW_CI_VERDICT_GATE"),
+            # Retraction-verdict gate — same default-true killswitch shape.
+            retraction_verdict_gate=getflag_on(
+                "AGENT_REVIEW_RETRACTION_VERDICT_GATE"
+            ),
             # Linked-issue prefetch — default-true killswitch, same
             # typo-safe shape as the context-injection switches above.
             issue_context_prefetch=getflag_on("AGENT_REVIEW_ISSUE_PREFETCH"),

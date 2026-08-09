@@ -78,3 +78,12 @@ def test_prompts_forbid_version_nonexistence_blockers(mode):
     assert "cutoff" in text
     # The rule is worthless if it doesn't bind the verdict.
     assert "Blocker" in text
+def test_deep_prompt_forbids_self_refuting_findings():
+    """cora #38: a review posted four 🚨 Blockers whose own bodies each
+    reasoned their way to "actually this is fine" — red-blocking the PR
+    on nothing. The existing "hard constraint" bans planning *phrases*
+    ("Let me check…"); it does not cover a finding whose analysis
+    concludes there is no defect. Pin the separate rule."""
+    text = load_system_prompt(None, mode="deep")
+    assert "A finding is a conclusion, not an investigation" in text
+    assert "delete the bullet" in text

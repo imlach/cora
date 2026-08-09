@@ -441,6 +441,14 @@ CONTEXT_INJECTION_CI_GREEN = True
 # typo-safe shape as the other reliability toggles above.
 CI_VERDICT_GATE_ENABLED = True
 
+# Finalize-time retraction-verdict gate (see
+# `cora.review._retraction_gate`) — downgrades a block-severity verdict
+# whose every 🚨 Blocker bullet withdraws itself in its own text
+# (cora #38). `detect_blocker` already discounted those bullets for the
+# automerge decision; this stops the verdict line disagreeing with it.
+# Default-on kill switch, same typo-safe shape as the toggles above.
+RETRACTION_VERDICT_GATE_ENABLED = True
+
 # Tool-use trajectory capture `source` tag (`REVIEWER_TRANSCRIPT_SOURCE`)
 # — labels rows in the captured JSONL for teacher-data provenance.
 DEFAULT_TRANSCRIPT_SOURCE = "trajectory-live"
