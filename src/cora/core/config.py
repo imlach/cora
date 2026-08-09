@@ -556,6 +556,33 @@ ISSUE_BLOCK_CHAR_CAP = 10_000
 # per_page bound here doubles as the recency cutoff.
 ISSUE_MAX_COMMENTS_FETCHED = 15
 
+# ── Review-thread evidence (cora #37) ────────────────────────────────
+# A re-review used to see nothing a human had said on the PR: the only
+# reason `pr_context` listed comments at all was to find the
+# classifier's own marked one. So a maintainer who rebutted a false
+# finding *with log evidence* was invisible, and the re-review
+# re-asserted the same finding verbatim — a deadlock only a human
+# override breaks. Recent maintainer comments now ride into the initial
+# prompt as evidence to weigh.
+#
+# Default-on kill switch (`AGENT_REVIEW_THREAD_EVIDENCE`; only the
+# literal "false" disables), matching ISSUE_PREFETCH_ENABLED.
+THREAD_EVIDENCE_ENABLED = True
+# Only comments whose REST `author_association` is in this set are fed
+# in. On a public repo anyone can comment, and this text lands in the
+# reviewer's context — the same standing bar the trigger policy uses
+# (`trigger.DEFAULT_ALLOWED_ASSOCIATIONS`) is the right one here. Note
+# this narrows *whose* comments are read; it does not make them trusted
+# INSTRUCTIONS — the block is wrapped `<untrusted-content>` regardless.
+THREAD_EVIDENCE_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+# Most-recent N comments, newest last. Small: this is "what did a human
+# just tell us", not a thread archive.
+THREAD_EVIDENCE_MAX_COMMENTS = 6
+# Per-comment and whole-block caps. Sized well under the issue-prefetch
+# block — a rebuttal is usually a paragraph and a log excerpt.
+THREAD_EVIDENCE_COMMENT_CHAR_CAP = 1_500
+THREAD_EVIDENCE_BLOCK_CHAR_CAP = 6_000
+
 # Whitelist of MCP-server tools exposed to the agent for PR review.
 # Live-infrastructure tools (kubectl_*, loki_query, prometheus_query,
 # pods_top, nodes_top) are excluded — reviewing a static diff doesn't

@@ -214,6 +214,18 @@ class ReviewerConfig:
     issue_comment_char_cap: int = _c.ISSUE_COMMENT_CHAR_CAP
     issue_block_char_cap: int = _c.ISSUE_BLOCK_CHAR_CAP
 
+    # ── Review-thread evidence (recent maintainer comments fed into the
+    #    initial prompt so a re-review can converge on a rebuttal
+    #    instead of re-asserting a refuted finding; cora #37) —
+    #    default-on kill switch, env `AGENT_REVIEW_THREAD_EVIDENCE` ───
+    thread_evidence: bool = _c.THREAD_EVIDENCE_ENABLED
+    thread_evidence_associations: frozenset[str] = field(
+        default_factory=lambda: frozenset(_c.THREAD_EVIDENCE_ASSOCIATIONS)
+    )
+    thread_evidence_max_comments: int = _c.THREAD_EVIDENCE_MAX_COMMENTS
+    thread_evidence_comment_char_cap: int = _c.THREAD_EVIDENCE_COMMENT_CHAR_CAP
+    thread_evidence_block_char_cap: int = _c.THREAD_EVIDENCE_BLOCK_CHAR_CAP
+
     # ── Retrieval (consumed via the RetrievalProvider seam) ──────────
     qdrant_url: str = _c.DEFAULT_QDRANT_URL
     tei_url: str = _c.DEFAULT_TEI_URL
@@ -505,6 +517,8 @@ class ReviewerConfig:
             # Linked-issue prefetch — default-true killswitch, same
             # typo-safe shape as the context-injection switches above.
             issue_context_prefetch=getflag_on("AGENT_REVIEW_ISSUE_PREFETCH"),
+            # Review-thread evidence — same default-true killswitch shape.
+            thread_evidence=getflag_on("AGENT_REVIEW_THREAD_EVIDENCE"),
         )
 
         # Wall-time ops overrides: an explicit

@@ -242,6 +242,133 @@ def fetch_classifier_rationale(repo: str, pr_number: str) -> str | None:
     return "\n".join(lines)
 
 
+def fetch_thread_evidence(
+    repo: str,
+    pr_number: str,
+    *,
+    cfg: "ReviewerConfig | None" = None,
+) -> str | None:
+    """Recent maintainer comments on the PR, rendered as an
+    `<untrusted-content>`-wrapped prompt section, or None.
+
+    cora #37: a re-review saw nothing a human had said. The only reason
+    this module listed PR comments was `fetch_classifier_rationale`
+    hunting its own marker — so a maintainer who rebutted a false
+    finding *with log evidence* was invisible, and the re-review
+    re-asserted the finding verbatim. Only a human override broke it.
+
+    What's excluded and why:
+
+    - **cora's own comments** (`COMMENT_MARKER` / the legacy and
+      run-scoped markers). Feeding the reviewer its own prior verdict
+      invites it to anchor on the finding it is supposed to re-examine
+      — the opposite of the point.
+    - **The classifier's comment.** Already rendered separately by
+      `fetch_classifier_rationale`, and duplicating it wastes context.
+    - **Bots.** CI chatter is noise, and the CI context block is where
+      build signal belongs.
+    - **Anyone outside `thread_evidence_associations`.** On a public
+      repo anyone can comment; this text lands in the reviewer's
+      context, so the standing bar matches the trigger policy's.
+
+    The association filter narrows *whose* comments are read. It does
+    NOT make them instructions: the block is wrapped in
+    `<untrusted-content>` either way, because a maintainer account is
+    still an account, and "the maintainer told you to approve" is
+    exactly the escalation this boundary exists to stop.
+
+    Best-effort — every failure returns None and the review runs with
+    the prompt shape it had before this existed."""
+    from cora.core.config import (
+        COMMENT_MARKER,
+        LEGACY_COMMENT_MARKERS,
+        PROGRESS_MARKER_PREFIX,
+        THREAD_EVIDENCE_ASSOCIATIONS,
+        THREAD_EVIDENCE_BLOCK_CHAR_CAP,
+        THREAD_EVIDENCE_COMMENT_CHAR_CAP,
+        THREAD_EVIDENCE_MAX_COMMENTS,
+        VERDICT_MARKER_PREFIX,
+    )
+
+    associations = (
+        cfg.thread_evidence_associations if cfg is not None
+        else THREAD_EVIDENCE_ASSOCIATIONS
+    )
+    max_comments = (
+        cfg.thread_evidence_max_comments if cfg is not None
+        else THREAD_EVIDENCE_MAX_COMMENTS
+    )
+    per_cap = (
+        cfg.thread_evidence_comment_char_cap if cfg is not None
+        else THREAD_EVIDENCE_COMMENT_CHAR_CAP
+    )
+    block_cap = (
+        cfg.thread_evidence_block_char_cap if cfg is not None
+        else THREAD_EVIDENCE_BLOCK_CHAR_CAP
+    )
+
+    cora_markers = (
+        COMMENT_MARKER,
+        PROGRESS_MARKER_PREFIX,
+        VERDICT_MARKER_PREFIX,
+        _CLASSIFIER_COMMENT_MARKER,
+        *LEGACY_COMMENT_MARKERS,
+    )
+    try:
+        raw = run([
+            "gh", "api", "-H", "Accept: application/vnd.github+json",
+            f"/repos/{repo}/issues/{pr_number}/comments?per_page=100",
+        ])
+        comments = json.loads(raw)
+    except Exception as exc:  # noqa: BLE001
+        print(f"::warning::thread-evidence fetch failed: {exc}")
+        return None
+    if not isinstance(comments, list):
+        return None
+
+    allowed = {a.upper() for a in associations}
+    kept: list[tuple[str, str]] = []
+    for c in comments:
+        if not isinstance(c, dict):
+            continue
+        body = (c.get("body") or "").strip()
+        if not body or any(m in body for m in cora_markers):
+            continue
+        user = c.get("user") or {}
+        if (user.get("type") or "") == "Bot":
+            continue
+        login = (user.get("login") or "").strip()
+        if login.endswith("[bot]"):
+            continue
+        if (c.get("author_association") or "").upper() not in allowed:
+            continue
+        if len(body) > per_cap:
+            body = body[:per_cap] + "\n…[comment truncated]"
+        kept.append((login or "unknown", body))
+
+    if not kept:
+        return None
+    # GitHub returns oldest-first; the newest comments are the ones a
+    # re-review needs, so keep the tail and re-order oldest-first for
+    # readability.
+    kept = kept[-max_comments:]
+
+    lines = ["<untrusted-content>"]
+    used = 0
+    dropped = 0
+    for login, body in kept:
+        entry = f"\n**@{login}** wrote:\n\n{body}\n"
+        if used + len(entry) > block_cap and lines[-1] != "<untrusted-content>":
+            dropped += 1
+            continue
+        lines.append(entry)
+        used += len(entry)
+    if dropped:
+        lines.append(f"\n_[{dropped} older comment(s) omitted for budget]_\n")
+    lines.append("</untrusted-content>")
+    return "\n".join(lines)
+
+
 def is_bot_author(metadata: dict) -> bool:
     """Detect bot-authored PRs (Renovate, Dependabot, etc.). gh returns
     `author.is_bot` directly; the login-suffix check is a fallback."""
