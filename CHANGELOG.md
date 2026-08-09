@@ -92,6 +92,25 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   single-edited-comment engine, so it can ship first.
 
 ### Fixed
+- **A crashed review no longer leaves its PR comment reading "in
+  progress" forever** (#14). Every *handled* terminal path finalizes
+  the "🔄 Reviewing PR … this comment will update with the verdict"
+  placeholder, but an exception escaping the pipeline unwound straight
+  to `python -m cora`'s hard-failure boundary, which prints and exits
+  1 — leaving a comment indistinguishable from a run still in flight,
+  and costing real time diagnosing whether the run was alive. The
+  progress check-run had the same hole (the SIGTERM guard covers a
+  kill, not a crash). Both are now finalized on the way out: the
+  comment becomes "review errored (`<ExcType>`) before producing a
+  verdict — re-push to retry" and the check concludes `cancelled`
+  (in the merge gate's tolerated set; the crash is already loud via
+  the nonzero exit). Both writes are best-effort and warn rather than
+  raise — the original traceback still propagates unchanged. The
+  comment write is guarded on the new `Reporter.progress_open`, so a
+  run that never posted a placeholder (quick mode, early-exit skips)
+  does not get a crash comment invented for it. `progress_open` is
+  concrete on the ABC and defaults False, so existing third-party
+  `Reporter` implementations keep working.
 - **`detect_blocker` no longer counts a retracted `🚨 Blocker` bullet.**
   Observed live on imlach/cora#25: a review posted a Blocker bullet reading
   *"This is a false alarm from the truncated diff display — the code is

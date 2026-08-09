@@ -196,14 +196,18 @@ async def _arun_review_inner(
     git: GitProvider | None,
     second_opinion: SecondOpinionProvider | None,
 ) -> ReviewResult:
-    """The pipeline, wrapped so every exit closes the log stream.
+    """The pipeline, wrapped so every exit closes the log stream and
+    leaves no live-progress surface reading "still running".
 
-    `_pipeline` is where the phases live; this wrapper's only job is the
-    `agent_review finish` line. A review that logs its turns and then
-    goes silent is indistinguishable from one still running, so the
-    finish line has to survive the skip returns AND cancellation —
-    `BaseException` deliberately, since `CancelledError` is the case
-    that produced the silent runs."""
+    `_pipeline` is where the phases live; this wrapper's job is the
+    `agent_review finish` line plus the crash finalize. A review that
+    logs its turns and then goes silent is indistinguishable from one
+    still running, so the finish line has to survive the skip returns
+    AND cancellation — `BaseException` deliberately, since
+    `CancelledError` is the case that produced the silent runs. The same
+    argument applies to the two surfaces a human actually looks at (the
+    placeholder comment and the progress check), which is what
+    `_finalize_surfaces_on_crash` handles."""
     run = build_run(
         cfg,
         reporter=reporter,
@@ -215,12 +219,59 @@ async def _arun_review_inner(
         result = await _pipeline(run)
     except BaseException as exc:
         emit_finish(run, terminated_reason=f"cancelled:{type(exc).__name__}")
+        _finalize_surfaces_on_crash(run.reporter, exc)
         raise
     # No-op on the normal path — `produce_output` already emitted with
     # the leak/preamble detail. This catches the skip returns, which
     # never reach it.
     emit_finish(run, terminated_reason=result.terminated_reason)
     return result
+
+
+def _finalize_surfaces_on_crash(reporter: Reporter | None, exc: BaseException) -> None:
+    """Close the placeholder comment and the progress check when the
+    pipeline dies with an exception instead of returning a result.
+
+    cora #14: every *handled* terminal path finalizes the "🔄 Reviewing
+    PR … this comment will update with the verdict" placeholder, but an
+    exception escaping `_pipeline` did not — it unwound to
+    `__main__`'s hard-failure boundary, which prints and exits 1. The
+    comment then reads "in progress" forever, which is indistinguishable
+    from a run that is genuinely still going, and cost real time
+    diagnosing exactly that. The progress check-run had the same hole
+    (the SIGTERM guard covers a kill, not a crash).
+
+    Both writes are best-effort: this runs while an exception is already
+    propagating, and the original traceback is what matters — a failure
+    to post must never replace it. `complete_check` is first-write-wins,
+    so a path that already concluded the check is not clobbered.
+
+    Conclusion is `cancelled`, not `failure`: it's in the merge gate's
+    tolerated set, and the honest signal is "no verdict was produced,
+    re-push to retry". The crash itself is already loud — the process
+    exits nonzero and the job goes red."""
+    if reporter is None:
+        return
+    kind = type(exc).__name__
+    if reporter.progress_open:
+        try:
+            reporter.post_skip(
+                f"review errored ({kind}) before producing a verdict — "
+                "re-push to retry"
+            )
+        except Exception as post_exc:  # noqa: BLE001
+            print(f"::warning::crash comment finalize failed: {post_exc}")
+    if reporter.check_open:
+        try:
+            reporter.complete_check(
+                verdict_line="errored before producing a verdict",
+                conclusion="cancelled",
+                budget=None,
+                wall_time_s=0.0,
+                terminated_reason=f"crashed:{kind}",
+            )
+        except Exception as check_exc:  # noqa: BLE001
+            print(f"::warning::crash check finalize failed: {check_exc}")
 
 
 async def _pipeline(run: ReviewRun) -> ReviewResult:
