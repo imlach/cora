@@ -40,9 +40,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
-
+from typing import Any, Literal
 
 # Env knob — default "true", set "false" to bypass entirely.
 ESCALATION_ENV_VAR = "AGENT_REVIEW_PATCH_ESCALATION"

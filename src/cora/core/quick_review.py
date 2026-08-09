@@ -37,7 +37,7 @@ async def quick_review_call(
     # The run's ReviewerConfig, threaded into Deps so tools/hooks read
     # tunables from the config object. None → Deps default-constructs
     # one whose fields mirror the engine constants (same behaviour).
-    cfg: "ReviewerConfig | None" = None,
+    cfg: ReviewerConfig | None = None,
 ) -> tuple[str, str | None]:
     """Single-turn quick review. See module docstring."""
     # Local import keeps the framework dep off the module-load path.
@@ -192,7 +192,7 @@ async def _recover_quick(
     agent,
     msgs: list,
     deps,
-    cfg: "ReviewerConfig",
+    cfg: ReviewerConfig,
     timeout_s: int,
     pr_number: str,
 ):

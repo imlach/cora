@@ -43,7 +43,6 @@ from cora.core.config import (
     TOOL_RESULT_CHAR_CAP,
 )
 
-
 _GREP_SKIP_DIRS = frozenset(
     {
         ".git", "node_modules", "__pycache__", ".venv", "venv",

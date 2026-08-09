@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from cora.core import detect_reasoning_leak
 
-
 # ---------------------------------------------------------------------------
 # Strict marker — pre-existing behaviour, must not regress
 # ---------------------------------------------------------------------------

@@ -110,8 +110,8 @@ from cora.review._signals import (  # noqa: F401
 )
 from cora.review._state import ReviewRun, _eval_dump  # noqa: F401
 from cora.review._tiers import (  # noqa: F401
-    _default_policy,
     _continuation_tier_runner,
+    _default_policy,
     _wall_budgets,
     dispatch_tiers,
     second_opinion_dispatch,

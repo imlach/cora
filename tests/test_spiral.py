@@ -180,7 +180,7 @@ def test_quick_recovery_returns_recovered_body(monkeypatch):
     )
     monkeypatch.setattr(
         "cora.core.litellm_capture.drain_captured_headers",
-        lambda: {},
+        dict,
     )
 
     # Patch capture_run_messages to a simple list we can seed into (the
@@ -252,7 +252,7 @@ def test_quick_flag_off_no_recovery_attempt(monkeypatch):
 
     monkeypatch.setattr("cora.core.agent.make_review_agent", _make)
     monkeypatch.setattr(
-        "cora.core.litellm_capture.drain_captured_headers", lambda: {}
+        "cora.core.litellm_capture.drain_captured_headers", dict
     )
     # If the flag-off path wrongly entered the capture branch, this would
     # be invoked; assert it is NOT by making it explode.
@@ -316,7 +316,7 @@ def test_quick_recovery_also_spirals_soft_fails(monkeypatch):
 
     monkeypatch.setattr("cora.core.agent.make_review_agent", _make)
     monkeypatch.setattr(
-        "cora.core.litellm_capture.drain_captured_headers", lambda: {}
+        "cora.core.litellm_capture.drain_captured_headers", dict
     )
 
     @contextlib.contextmanager
@@ -418,7 +418,7 @@ def _wire_deep(monkeypatch, agent):
         "cora.core.loop_logging.iter_with_turn_logging", _iter_raises
     )
     monkeypatch.setattr(
-        "cora.core.litellm_capture.drain_captured_headers", lambda: {}
+        "cora.core.litellm_capture.drain_captured_headers", dict
     )
 
 
@@ -478,7 +478,7 @@ def test_deep_recovery_returns_recovered_body(monkeypatch):
     )
     _wire_deep(monkeypatch, agent)
 
-    body, reason, tools, messages = _run_deep(
+    body, reason, _tools, _messages = _run_deep(
         ReviewerConfig(
             spiral_recovery=True,
             spiral_recovery_max_output_tokens=9999,
@@ -512,7 +512,7 @@ def test_deep_flag_off_no_recovery(monkeypatch):
     )
     _wire_deep(monkeypatch, agent)
 
-    body, reason, tools, messages = _run_deep(ReviewerConfig())  # flag off
+    body, reason, _tools, _messages = _run_deep(ReviewerConfig())  # flag off
 
     assert body == ""
     assert reason is not None and reason.startswith("agent-loop-errored:")
@@ -534,7 +534,7 @@ def test_deep_recovery_also_fails_soft_fails(monkeypatch):
     )
     _wire_deep(monkeypatch, agent)
 
-    body, reason, tools, messages = _run_deep(
+    body, reason, _tools, _messages = _run_deep(
         ReviewerConfig(spiral_recovery=True)
     )
 

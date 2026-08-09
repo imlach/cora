@@ -29,7 +29,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any, Callable, Sequence
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any
 
 from cora.core.budget import (
     T0_COLD_START_ALLOWANCE_S,
@@ -96,7 +97,7 @@ def _no_thinking_extra_body() -> dict[str, Any]:
     return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
 
 
-def _make_verdict_probe(cfg: "ReviewerConfig | None") -> Callable[[str], bool]:
+def _make_verdict_probe(cfg: ReviewerConfig | None) -> Callable[[str], bool]:
     """`(text) -> bool`: does this response body already carry a
     parseable verdict?
 
@@ -121,7 +122,7 @@ def _make_pydantic_ai_local_tools(
     *,
     git_provider: GitProvider | None = None,
     repo: str | None = None,
-    cfg: "ReviewerConfig | None" = None,
+    cfg: ReviewerConfig | None = None,
 ):
     """Build typed Pydantic-AI tool wrappers around the repo-introspection
     grep_repo + git_show handlers (served via a `GitProvider`) plus, when
@@ -357,7 +358,11 @@ def _loaded_tool_names(
 # and triage now import the single copy. Keep the
 # legacy name as a thin alias so existing intra-module references
 # don't need a sweeping rename in the same change.
-from cora.core.mcp_probe import probe_mcp_server as _probe_mcp_server  # noqa: E402, F401
+from cora.core.mcp_probe import (  # noqa: E402 — deliberate: the
+    # comment above explains why this alias sits here rather than at
+    # the top of the module.
+    probe_mcp_server as _probe_mcp_server,
+)
 
 
 async def deep_review_call(
@@ -382,7 +387,7 @@ async def deep_review_call(
     web_fetch_headers: dict[str, str] | None = None,
     # Generic extra MCP sessions (from `MCP_SERVERS`) — appended after
     # the three named slots above; see `cora.core.mcp_sessions`.
-    extra_sessions: "Sequence[McpServerSpec]" = (),
+    extra_sessions: Sequence[McpServerSpec] = (),
     # Allowlist filter applied to MCP toolsets.
     allowed_tools: set[str],
     # Tool-arg defaults (e.g. {"web_fetch_doc": {"caller": "cora"}}).
@@ -414,11 +419,11 @@ async def deep_review_call(
     # the thinking toggle. None keeps the legacy behaviour exactly
     # (Deps default-constructs a mirror config; the thinking toggle
     # falls back to its call-time env read).
-    cfg: "ReviewerConfig | None" = None,
+    cfg: ReviewerConfig | None = None,
     # Repo-introspection backend for the local grep_repo / git_show
     # tools. None → LocalGitProvider (the in-CI checkout), the
     # default behaviour.
-    git_provider: "GitProvider | None" = None,
+    git_provider: GitProvider | None = None,
 ) -> tuple[str, str | None, list[str], list]:
     """Drive one deep-mode review run. Returns
     `(final_body, terminated_reason, tools_available, messages)` so
@@ -829,7 +834,7 @@ async def deep_review_call(
                         messages = []
                     redraw_from_turn = exc.turn
                     redraw_prior_text = getattr(exc, "partial_text", "") or ""
-                except (WallTimeExceeded, asyncio.TimeoutError) as exc:
+                except (TimeoutError, WallTimeExceeded) as exc:
                     # Wall-time guard tripped. Same downstream shape as
                     # max_iterations — snapshot messages so T1
                     # continuation can pick up the trajectory, then

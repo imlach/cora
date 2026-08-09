@@ -25,7 +25,7 @@ import os
 import re
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from cora.core.check_run import _grafana_drilldown_url, _workflow_run_url
 from cora.core.config import (
@@ -36,7 +36,6 @@ from cora.core.config import (
     PROGRESS_MARKER_PREFIX,
     VERDICT_MARKER_PREFIX,
 )
-
 
 # 4xx/5xx in gh's stderr — App-token install-token edges occasionally
 # 401-flake (a transient 401 once lost a review comment that way), and
@@ -363,7 +362,7 @@ def _fmt_ts(dt: datetime) -> str:
     """Footer timestamp — UTC, second precision. Unambiguous across
     readers' mixed local zones and stable when the comment is read days
     after the run."""
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    return dt.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 def make_skip_comment(reason: str) -> str:

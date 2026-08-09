@@ -40,7 +40,8 @@ Output row shape (one trajectory):
 from __future__ import annotations
 
 import json
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 # part_kind → our handling. pydantic-ai stamps every ModelRequest /
 # ModelResponse part with one of these literals. Anything not listed

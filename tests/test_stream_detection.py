@@ -72,9 +72,11 @@ class _FakeModelRequestNode:
     async def stream(self, _ctx):
         try:
             yield self._stream
-        except BaseException:
-            # Mirrors pydantic-ai: raising out of the block cancels the
-            # request and commits nothing. Exiting cleanly finalises.
+        except BaseException:  # noqa: TRY203 — the bare re-raise is
+            # structurally required: `try`/`else` with no `except` is a
+            # SyntaxError, and the `else` is what makes this fake mirror
+            # pydantic-ai (raising cancels and commits nothing; exiting
+            # cleanly finalises).
             raise
         else:
             self.finished = True
@@ -111,16 +113,16 @@ class _FakeRun:
 def _drive(node, *, logs=None, **kwargs):
     from cora.core.loop_logging import iter_with_turn_logging
 
-    settings = dict(
-        phase="T0",
-        pr_number="1234",
-        turn_counter=[0],
-        tool_call_counter={},
-        log=(logs.append if logs is not None else (lambda _m: None)),
-        stream_detect=True,
-        stall_timeout_s=0.05,
-        thinking_budget_tokens=10,
-    )
+    settings = {
+        "phase": "T0",
+        "pr_number": "1234",
+        "turn_counter": [0],
+        "tool_call_counter": {},
+        "log": (logs.append if logs is not None else (lambda _m: None)),
+        "stream_detect": True,
+        "stall_timeout_s": 0.05,
+        "thinking_budget_tokens": 10,
+    }
     settings.update(kwargs)
     return asyncio.run(iter_with_turn_logging(_FakeRun([node]), **settings))
 

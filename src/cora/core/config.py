@@ -10,7 +10,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-
 # REPO_ROOT — the checked-out repo the reviewer operates on (greps,
 # git-shows, reads prompts from). Resolved at runtime, NOT from this
 # file's install location: installed `cora` lives in site-packages, so a

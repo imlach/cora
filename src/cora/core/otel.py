@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Avoid forcing the heavy SDK import at module load — the runtime
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 DEFAULT_SERVICE_NAME = "cora"
 
 
-def init_tracing() -> Optional["TracerProvider"]:
+def init_tracing() -> TracerProvider | None:
     """Initialise the global OTel tracer provider.
 
     Returns the configured `TracerProvider` so the caller can

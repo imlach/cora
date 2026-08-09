@@ -16,8 +16,7 @@ import os
 import subprocess
 
 from cora.core.budget import Budget
-
-from cora.core.config import CHECK_RUN_NAME, GRAFANA_BASE, DASHBOARD_PATH
+from cora.core.config import CHECK_RUN_NAME, DASHBOARD_PATH, GRAFANA_BASE
 
 
 def _gh_check_api(args: list[str], payload: dict) -> subprocess.CompletedProcess:

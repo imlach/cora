@@ -18,10 +18,8 @@ Run via:
 
 from __future__ import annotations
 
-
 from cora.core import retrieval as r
 from cora.core._bm25 import _bm25_sparse, _stable_token_id
-
 
 # ---------------------------------------------------------------------------
 # Identifier extraction

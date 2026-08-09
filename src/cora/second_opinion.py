@@ -36,8 +36,9 @@ implementation that pulls in engine internals lives in `core/`.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Sequence
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from cora.config import ReviewerConfig
@@ -85,7 +86,7 @@ class SecondOpinionProvider(ABC):
 
     @abstractmethod
     def should_dispatch(
-        self, *, cfg: "ReviewerConfig", is_quick: bool, primary_body: str | None
+        self, *, cfg: ReviewerConfig, is_quick: bool, primary_body: str | None
     ) -> bool:
         """Whether to fire the second opinion for this run. Consulted
         before `dispatch`; the caller skips the dispatch leg entirely when
@@ -96,7 +97,7 @@ class SecondOpinionProvider(ABC):
     async def dispatch(
         self,
         *,
-        cfg: "ReviewerConfig",
+        cfg: ReviewerConfig,
         endpoint_base_url: str,
         api_key: str,
         system_prompt: str,
@@ -110,7 +111,7 @@ class SecondOpinionProvider(ABC):
         mcp_actions_url: str | None,
         mcp_actions_headers: dict[str, str] | None,
         web_fetch_url: str | None,
-        git: "GitProvider | None",
+        git: GitProvider | None,
         log: Callable[[str], None],
         iter_log: Callable[[str], None],
         primary_terminated_reason: str | None = None,
@@ -120,7 +121,7 @@ class SecondOpinionProvider(ABC):
         # `NullSecondOpinion`) keeps working unchanged; only
         # `T2SecondOpinion` (the shipped default) needs to read it. See
         # `cora.core.mcp_sessions`.
-        extra_sessions: "Sequence[McpServerSpec]" = (),
+        extra_sessions: Sequence[McpServerSpec] = (),
     ) -> SecondOpinionResult:
         """Fire the second review. Returns a `SecondOpinionResult` whose
         `dispatched=True` and `body` carries the raw (pre-leak) body.
@@ -133,7 +134,7 @@ class SecondOpinionProvider(ABC):
         self,
         *,
         result: SecondOpinionResult,
-        cfg: "ReviewerConfig",
+        cfg: ReviewerConfig,
         is_quick: bool,
         primary_body_to_post: str,
         primary_terminated_reason: str | None,
@@ -157,7 +158,7 @@ class SecondOpinionProvider(ABC):
         self,
         *,
         result: SecondOpinionResult,
-        cfg: "ReviewerConfig",
+        cfg: ReviewerConfig,
         is_quick: bool,
         pr_number: str,
         iter_log: Callable[[str], None],
@@ -168,7 +169,7 @@ class SecondOpinionProvider(ABC):
         ordering."""
 
     @classmethod
-    def from_config(cls, cfg: "ReviewerConfig") -> "SecondOpinionProvider":
+    def from_config(cls, cfg: ReviewerConfig) -> SecondOpinionProvider:
         """Select the provider for `cfg`. `T2SecondOpinion`
         is the default — it self-disarms when `cfg.t2_disagreement` is off
         (the default), so the generic path runs *no* second opinion unless
@@ -186,7 +187,7 @@ class NullSecondOpinion(SecondOpinionProvider):
     alt-reviewer tier."""
 
     def should_dispatch(
-        self, *, cfg: "ReviewerConfig", is_quick: bool, primary_body: str | None
+        self, *, cfg: ReviewerConfig, is_quick: bool, primary_body: str | None
     ) -> bool:
         return False
 

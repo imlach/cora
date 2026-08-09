@@ -145,7 +145,7 @@ def build_retrieval_query(
     metadata: dict,
     diff_text: str,
     *,
-    cfg: "ReviewerConfig | None" = None,
+    cfg: ReviewerConfig | None = None,
 ) -> dict:
     """Build the retrieval query as both raw text + structured signal.
 
@@ -232,12 +232,12 @@ def _cache_key(repo: str, pr_number: str, head_sha: str, query_text: str) -> str
     cache even though the query MIGHT have ended up identical."""
     h = hashlib.sha256()
     h.update(
-        f"{repo}\x00{pr_number}\x00{head_sha}\x00{query_text}".encode("utf-8")
+        f"{repo}\x00{pr_number}\x00{head_sha}\x00{query_text}".encode()
     )
     return h.hexdigest()[:32]
 
 
-def _cache_dir(cfg: "ReviewerConfig | None") -> Path:
+def _cache_dir(cfg: ReviewerConfig | None) -> Path:
     """Resolve the cache dir: the threaded config wins; the legacy path
     (no config) re-reads the env override at call time, exactly as
     before the threading."""
@@ -248,7 +248,7 @@ def _cache_dir(cfg: "ReviewerConfig | None") -> Path:
     )
 
 
-def _cache_ttl_s(cfg: "ReviewerConfig | None") -> int:
+def _cache_ttl_s(cfg: ReviewerConfig | None) -> int:
     """Resolve the cache TTL — same config-wins / env-fallback split as
     `_cache_dir`."""
     if cfg is not None:
@@ -259,7 +259,7 @@ def _cache_ttl_s(cfg: "ReviewerConfig | None") -> int:
 
 
 def _cache_get(
-    key: str, *, cfg: "ReviewerConfig | None" = None
+    key: str, *, cfg: ReviewerConfig | None = None
 ) -> tuple[list[dict] | None, float | None]:
     """Read a cached top-K. Returns ``(docs, age_s)`` on hit, ``(None,
     None)`` on miss / expiry / read error. Read errors are soft-failed —
@@ -277,7 +277,7 @@ def _cache_get(
 
 
 def _cache_put(
-    key: str, docs: list[dict], *, cfg: "ReviewerConfig | None" = None
+    key: str, docs: list[dict], *, cfg: ReviewerConfig | None = None
 ) -> None:
     """Write the cache file. Best-effort — any failure (disk full,
     permission, etc.) is swallowed; the review proceeds normally."""
@@ -574,7 +574,7 @@ def retrieve_relevant_docs(
     tei_url: str,
     reranker_url: str,
     top_k: int | None = None,
-    cfg: "ReviewerConfig | None" = None,
+    cfg: ReviewerConfig | None = None,
 ) -> tuple[list[dict], dict]:
     """Hybrid + two-stage-rerank retrieval pipeline.
 
@@ -711,7 +711,7 @@ def retrieve_relevant_docs(
         query["text"], snippets, reranker_url, timeout_s=timeout_s
     )
     stage1_ranked = sorted(
-        zip(merged, stage1_scores), key=lambda p: p[1], reverse=True
+        zip(merged, stage1_scores, strict=False), key=lambda p: p[1], reverse=True
     )[:stage1_survivors]
     trace["stages"]["rerank_stage1_ms"] = int((time.monotonic() - t_rr1) * 1000)
     trace["rerank_stage1_top_n"] = [
@@ -751,7 +751,7 @@ def retrieve_relevant_docs(
             query["text"], [d["body"] for d in docs_with_bodies], reranker_url,
             timeout_s=timeout_s,
         )
-        for d, s in zip(docs_with_bodies, stage2_scores):
+        for d, s in zip(docs_with_bodies, stage2_scores, strict=False):
             d["score"] = float(s)
         docs_with_bodies.sort(key=lambda d: d["score"], reverse=True)
         docs_with_bodies = docs_with_bodies[:top_k]

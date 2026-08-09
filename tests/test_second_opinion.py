@@ -21,7 +21,7 @@ from cora.second_opinion import (
 
 
 def _cfg(**overrides) -> ReviewerConfig:
-    base = dict(repo="o/r", pr_number="1", llm_api_key="k", model="m")
+    base = {"repo": "o/r", "pr_number": "1", "llm_api_key": "k", "model": "m"}
     base.update(overrides)
     return ReviewerConfig(**base)
 

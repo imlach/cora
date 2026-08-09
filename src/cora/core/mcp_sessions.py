@@ -285,7 +285,7 @@ async def open_mcp_sessions(
     return toolsets, opened
 
 
-def resolve_web_fetch_url(cfg: "ReviewerConfig") -> str:
+def resolve_web_fetch_url(cfg: ReviewerConfig) -> str:
     """Resolve the web-fetch-gate endpoint for the release-notes
     pre-fetch (`review/_context.py`) and the initial-prompt's "a fetch
     tool is available" advertisement.

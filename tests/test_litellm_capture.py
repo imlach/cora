@@ -40,7 +40,7 @@ def test_hook_captures_x_litellm_headers():
 
     async def go() -> dict[str, str]:
         client = build_capture_client()
-        client._transport = _mock_transport(  # noqa: SLF001 — test seam
+        client._transport = _mock_transport(
             {
                 "x-litellm-model-id": "backend-b",
                 "x-litellm-call-id": "abc123",
@@ -66,7 +66,7 @@ def test_drain_resets_to_empty():
 
     async def go() -> tuple[dict[str, str], dict[str, str]]:
         client = build_capture_client()
-        client._transport = _mock_transport(  # noqa: SLF001
+        client._transport = _mock_transport(
             {"x-litellm-model-id": "backend-a"}
         )
         await client.get("http://stub.test/anything")
@@ -88,7 +88,7 @@ def test_no_capture_when_headers_absent():
 
     async def go() -> dict[str, str]:
         client = build_capture_client()
-        client._transport = _mock_transport(  # noqa: SLF001
+        client._transport = _mock_transport(
             {"content-type": "application/json"}
         )
         await client.get("http://stub.test/anything")
@@ -109,7 +109,7 @@ def test_capture_visible_across_asyncio_task_boundary():
 
     async def go() -> dict[str, str]:
         client = build_capture_client()
-        client._transport = _mock_transport(  # noqa: SLF001
+        client._transport = _mock_transport(
             {"x-litellm-model-id": "backend-b"}
         )
 

@@ -49,7 +49,8 @@ captured messages, which is robust to pydantic-ai version drift.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable
+from collections.abc import Callable, Iterable
+from typing import Any
 
 
 def _part_kind(part: Any) -> str:

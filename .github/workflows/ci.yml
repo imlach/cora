@@ -39,3 +39,30 @@ jobs:
 
       - name: Test
         run: pytest -q
+
+  lint:
+    # Separate job, not a step on `test`: lint and tests fail for
+    # unrelated reasons, and one run should tell you about both. Single
+    # interpreter — ruff's own behaviour doesn't vary across the matrix,
+    # and `target-version = "py311"` in pyproject fixes the syntax level
+    # it lints against regardless of what runs it.
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # The pinned ruff from the dev extra, so CI and a local
+      # `pip install -e '.[dev]'` lint with the same rules. An unpinned
+      # ruff is what let 251 findings accumulate against a moving default
+      # rule set that no two machines agreed on.
+      - name: Install ruff
+        run: pip install -e '.[dev]'
+
+      - name: Lint
+        run: ruff check --output-format=github .

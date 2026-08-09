@@ -10,7 +10,6 @@ import pytest
 
 from cora.core.agent import AgentConfig, Deps, make_review_agent
 
-
 pytest.importorskip("pydantic_ai")
 
 
@@ -82,7 +81,7 @@ def test_make_review_agent_returns_pydantic_ai_agent():
     assert isinstance(agent, Agent)
     # Sanity: the deps_type is wired so a future RunContext[Deps]
     # access in a tool body has the right typed shape.
-    assert agent._deps_type is Deps  # noqa: SLF001 — internal-attr probe
+    assert agent._deps_type is Deps
 
 
 def test_make_review_agent_accepts_mcp_server_entries():

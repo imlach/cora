@@ -89,7 +89,7 @@ async def fetch_release_notes(
     release_url: str,
     *,
     caller: str = "cora-prefetch",
-    cfg: "ReviewerConfig | None" = None,
+    cfg: ReviewerConfig | None = None,
 ) -> dict[str, Any] | None:
     """Open a brief MCP session to the web-fetch-gate, call
     ``web_fetch_doc`` for ``release_url``, and return a normalised dict:

@@ -16,9 +16,7 @@ added referenced a file that only existed on the source PR's branch.
 """
 from __future__ import annotations
 
-
 from cora.core import patch_dispatch as pd
-
 
 _EDIT = {
     "path": "k8s/apps/monitoring/extras/kustomization.yaml",

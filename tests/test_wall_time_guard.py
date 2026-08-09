@@ -28,11 +28,12 @@ def test_iter_with_turn_logging_raises_walltime_when_deadline_past():
     node iteration must raise `WallTimeExceeded` — not silently
     continue. The fake `async for` yields nodes faster than the
     deadline allows so the trip is deterministic."""
+    from pydantic_ai._agent_graph import ModelRequestNode
+
     from cora.core.loop_logging import (
         WallTimeExceeded,
         iter_with_turn_logging,
     )
-    from pydantic_ai._agent_graph import ModelRequestNode
 
     class FakeModelReqNode(ModelRequestNode):
         def __init__(self):
@@ -72,8 +73,9 @@ def test_iter_with_turn_logging_no_deadline_runs_to_completion():
     """When `loop_deadline_monotonic` is None (default), the helper
     never checks a deadline — the existing call sites that don't pass
     one (tests, future triage adapter) keep working unchanged."""
-    from cora.core.loop_logging import iter_with_turn_logging
     from pydantic_ai._agent_graph import ModelRequestNode
+
+    from cora.core.loop_logging import iter_with_turn_logging
 
     class FakeModelReqNode(ModelRequestNode):
         def __init__(self):
@@ -103,8 +105,9 @@ def test_iter_with_turn_logging_deadline_in_future_completes():
     """A deadline far enough in the future should not trip on a short
     run — confirms the comparator direction (`now >= deadline`, not
     `now <= deadline`)."""
-    from cora.core.loop_logging import iter_with_turn_logging
     from pydantic_ai._agent_graph import ModelRequestNode
+
+    from cora.core.loop_logging import iter_with_turn_logging
 
     class FakeModelReqNode(ModelRequestNode):
         def __init__(self):
@@ -151,8 +154,9 @@ def test_asyncio_wait_for_caps_iter_when_in_loop_check_misses():
     that the wrapper code in `deep_review_call` would wrap with
     `wait_for`.
     """
-    from cora.core.loop_logging import iter_with_turn_logging
     from pydantic_ai._agent_graph import ModelRequestNode
+
+    from cora.core.loop_logging import iter_with_turn_logging
 
     class FakeModelReqNode(ModelRequestNode):
         def __init__(self):
@@ -225,7 +229,6 @@ def test_deep_review_preserves_wall_time_when_cleanup_raises(monkeypatch):
     # `agent.iter()` immediately raises WallTimeExceeded inside the
     # body, then raises a second empty-string exception during
     # cleanup. Tests the early_terminated_reason preservation.
-
     from cora.core.loop_logging import WallTimeExceeded
 
     class FakeAgentRun:
@@ -349,13 +352,14 @@ def test_iter_injects_user_prompt_into_next_model_request():
     of the user turn in pydantic-ai's graph.
     """
 
-    from cora.core.loop_logging import iter_with_turn_logging
     from pydantic_ai._agent_graph import CallToolsNode, ModelRequestNode
     from pydantic_ai.messages import (
         ModelRequest,
         ModelResponse,
         UserPromptPart,
     )
+
+    from cora.core.loop_logging import iter_with_turn_logging
 
     # Build a minimal CallToolsNode → ModelRequestNode → done sequence.
     # CallToolsNode carries a model_response so the iter helper emits
@@ -421,9 +425,10 @@ def test_iter_injects_user_prompt_into_next_model_request():
 def test_iter_skips_injection_when_refresher_returns_none():
     """If the refresher returns None (no delta), no part is added to
     any ModelRequest and the extend callback is not invoked."""
-    from cora.core.loop_logging import iter_with_turn_logging
     from pydantic_ai._agent_graph import CallToolsNode, ModelRequestNode
     from pydantic_ai.messages import ModelRequest, ModelResponse
+
+    from cora.core.loop_logging import iter_with_turn_logging
 
     next_request = ModelRequest(parts=[])
 
@@ -465,9 +470,10 @@ def test_iter_skips_extension_when_cap_hit():
     """Once the refresher reports `can_extend() == False`, further
     injections still land but the extend callback is NOT called —
     enforcing the documented +3-injection cap."""
-    from cora.core.loop_logging import iter_with_turn_logging
     from pydantic_ai._agent_graph import CallToolsNode, ModelRequestNode
     from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart
+
+    from cora.core.loop_logging import iter_with_turn_logging
 
     next_request = ModelRequest(parts=[])
 
@@ -619,11 +625,12 @@ def test_per_call_timeout_fires_on_slow_model_step():
     rather than letting the slow call run to completion. Reproduces
     the observed pathology where turn 1 streamed 324s of `<think>`
     tokens unchallenged."""
+    from pydantic_ai._agent_graph import ModelRequestNode
+
     from cora.core.loop_logging import (
         PerCallTimeoutExceeded,
         iter_with_turn_logging,
     )
-    from pydantic_ai._agent_graph import ModelRequestNode
 
     class FakeModelReqNode(ModelRequestNode):
         def __init__(self):
@@ -667,11 +674,12 @@ def test_first_call_extra_timeout_only_applies_to_first_call():
     Here the first call (0.2s) clears the 0.1+0.3=0.4 first-call cap, but
     the second identical call trips the base 0.1 cap, proving the allowance
     is one-shot (not a global per-call bump)."""
+    from pydantic_ai._agent_graph import ModelRequestNode
+
     from cora.core.loop_logging import (
         PerCallTimeoutExceeded,
         iter_with_turn_logging,
     )
-    from pydantic_ai._agent_graph import ModelRequestNode
 
     class FakeModelReqNode(ModelRequestNode):
         def __init__(self):
@@ -706,8 +714,9 @@ def test_per_call_timeout_none_disables_check():
     """`per_call_timeout_s=None` (the default) bypasses the wrap
     entirely — back-compat for callers that don't pass it (triage,
     existing tests, future direct uses)."""
-    from cora.core.loop_logging import iter_with_turn_logging
     from pydantic_ai._agent_graph import ModelRequestNode
+
+    from cora.core.loop_logging import iter_with_turn_logging
 
     class FakeModelReqNode(ModelRequestNode):
         def __init__(self):
@@ -737,8 +746,9 @@ def test_per_call_timeout_does_not_trip_fast_steps():
     """A per-call cap comfortably larger than per-step latency should
     not trip — confirms we're not accidentally counting cumulative
     elapsed against the cap (per-step semantics, not total)."""
-    from cora.core.loop_logging import iter_with_turn_logging
     from pydantic_ai._agent_graph import ModelRequestNode
+
+    from cora.core.loop_logging import iter_with_turn_logging
 
     class FakeModelReqNode(ModelRequestNode):
         def __init__(self):

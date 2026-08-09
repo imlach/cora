@@ -12,8 +12,9 @@ the gate: transient, re-push to retry).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+from cora.config import ReviewerConfig
 from cora.core import pr_context as _prc
 from cora.core.budget import PER_CALL_TIMEOUT_S
 from cora.core.check_run import _workflow_run_url
@@ -25,7 +26,6 @@ from cora.providers.retrieval import RetrievalProvider
 from cora.result import ReviewResult
 from cora.review._signals import _TIMEOUT_GUARD, _arm_timeout_guard
 from cora.review._state import ReviewRun
-from cora.config import ReviewerConfig
 from cora.second_opinion import SecondOpinionProvider
 
 
@@ -45,7 +45,7 @@ def build_run(
 
     # Wall-clock start — surfaced in the in-progress and final comment
     # footers so "started vs completed" is readable in place.
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
 
     eval_mode = bool((cfg.eval_output_dir or "").strip())
     if reporter is None or eval_mode:

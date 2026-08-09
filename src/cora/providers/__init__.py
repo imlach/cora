@@ -15,13 +15,13 @@ from cora.providers.retrieval import (
 )
 
 __all__ = [
-    "RetrievalProvider",
-    "NullRetrievalProvider",
-    "GlobRetrievalProvider",
-    "TeiQdrantRetrievalProvider",
-    "GitProvider",
-    "LocalGitProvider",
-    "Reporter",
     "GitHubReporter",
+    "GitProvider",
+    "GlobRetrievalProvider",
+    "LocalGitProvider",
     "NullReporter",
+    "NullRetrievalProvider",
+    "Reporter",
+    "RetrievalProvider",
+    "TeiQdrantRetrievalProvider",
 ]

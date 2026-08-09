@@ -91,12 +91,11 @@ def finalize(run: ReviewRun) -> ReviewResult:
         print(f"::warning::posting review comment failed: {exc}")
         return result
 
-    if pause_automerge:
-        if run.reporter.pause_automerge():
-            run.loki(
-                f"agent_review automerge_paused pr_number={pr_number} "
-                f"mode={run.mode} reason=blocker",
-                labels={"consumer": "pr-review", "kind": run.mode},
-            )
+    if pause_automerge and run.reporter.pause_automerge():
+        run.loki(
+            f"agent_review automerge_paused pr_number={pr_number} "
+            f"mode={run.mode} reason=blocker",
+            labels={"consumer": "pr-review", "kind": run.mode},
+        )
 
     return result

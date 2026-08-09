@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from cora.core import pr_context as _prc
 from cora.core.log import _gha_log
@@ -31,7 +31,7 @@ def _recent_run_counts(repo: str, author: str) -> tuple[int | None, int | None]:
     if not workflow or not repo:
         return None, None
     since = (
-        datetime.now(timezone.utc) - timedelta(hours=1)
+        datetime.now(UTC) - timedelta(hours=1)
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         raw = subprocess.run(

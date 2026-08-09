@@ -30,16 +30,14 @@ trace is covered by the live reviewer + GHA `_iter_log` event stream
 """
 from __future__ import annotations
 
-
-
-
 # ---------------------------------------------------------------- kill switch
 
 
 def test_escalation_enabled_default_true(monkeypatch):
     """Default behaviour: env var unset → escalation enabled."""
     from cora.core.patch_escalation import (
-        ESCALATION_ENV_VAR, escalation_enabled,
+        ESCALATION_ENV_VAR,
+        escalation_enabled,
     )
 
     monkeypatch.delenv(ESCALATION_ENV_VAR, raising=False)
@@ -49,7 +47,8 @@ def test_escalation_enabled_default_true(monkeypatch):
 def test_escalation_enabled_explicit_true(monkeypatch):
     """`AGENT_REVIEW_PATCH_ESCALATION=true` → enabled."""
     from cora.core.patch_escalation import (
-        ESCALATION_ENV_VAR, escalation_enabled,
+        ESCALATION_ENV_VAR,
+        escalation_enabled,
     )
 
     monkeypatch.setenv(ESCALATION_ENV_VAR, "true")
@@ -60,7 +59,8 @@ def test_escalation_disabled_kill_switch(monkeypatch):
     """`AGENT_REVIEW_PATCH_ESCALATION=false` → kill switch bypasses
     escalation entirely. Patches apply on the pre-escalation path."""
     from cora.core.patch_escalation import (
-        ESCALATION_ENV_VAR, escalation_enabled,
+        ESCALATION_ENV_VAR,
+        escalation_enabled,
     )
 
     monkeypatch.setenv(ESCALATION_ENV_VAR, "false")
@@ -80,7 +80,8 @@ def test_escalation_other_values_default_to_enabled(monkeypatch):
     `AGENT_REVIEW_PATCH_ESCALATION=disable` — the operator gets a
     safer default."""
     from cora.core.patch_escalation import (
-        ESCALATION_ENV_VAR, escalation_enabled,
+        ESCALATION_ENV_VAR,
+        escalation_enabled,
     )
 
     for value in ("", "yes", "on", "1", "disable", "off"):
@@ -93,7 +94,8 @@ def test_escalation_config_threaded_value_wins_over_env(monkeypatch):
     None keeps the legacy env read — same cfg=None contract as
     `deep_review._thinking_extra_body`."""
     from cora.core.patch_escalation import (
-        ESCALATION_ENV_VAR, escalation_enabled,
+        ESCALATION_ENV_VAR,
+        escalation_enabled,
     )
 
     monkeypatch.setenv(ESCALATION_ENV_VAR, "false")
@@ -239,7 +241,8 @@ def test_compose_disagree_hard_annotation():
     for human. Warning text must contain the model alias + verdict
     word + dissent summary so the human can act."""
     from cora.core.patch_escalation import (
-        LABEL_DISAGREEMENT, compose_escalation_outcome,
+        LABEL_DISAGREEMENT,
+        compose_escalation_outcome,
     )
 
     body = (
@@ -283,7 +286,8 @@ def test_compose_skipped_soft_annotation():
     line note across all surfaces (no "Human review required" banner),
     NOT flagged. Patch applies on T0's verdict alone."""
     from cora.core.patch_escalation import (
-        LABEL_SKIPPED, compose_escalation_outcome,
+        LABEL_SKIPPED,
+        compose_escalation_outcome,
     )
 
     out = compose_escalation_outcome(
@@ -519,7 +523,7 @@ def test_apply_inline_suggestions_prepends_summary_prefix(monkeypatch):
         patch_dispatch, "_gh_api_with_token", fake_gh_api_with_token,
     )
 
-    review_url, err = patch_dispatch.apply_inline_suggestions(
+    _review_url, err = patch_dispatch.apply_inline_suggestions(
         repo="owner/repo", pr_number="123",
         head_sha="abc123",
         summary="_Proposed by cora._",
@@ -554,7 +558,7 @@ def test_apply_inline_suggestions_no_prefix_back_compat(monkeypatch):
         patch_dispatch, "_gh_api_with_token", fake_gh_api_with_token,
     )
 
-    review_url, err = patch_dispatch.apply_inline_suggestions(
+    _review_url, err = patch_dispatch.apply_inline_suggestions(
         repo="owner/repo", pr_number="123",
         head_sha="abc123",
         summary="just the summary",
@@ -570,6 +574,7 @@ def test_apply_propose_patch_prepends_body_prefix(monkeypatch):
     draft PR body — the human reviewer sees the warning *before* the
     patch summary when they open the PR."""
     import base64
+
     from cora.core import patch_dispatch
 
     pr_payload: dict = {}

@@ -19,7 +19,6 @@ pytest.importorskip("pydantic_ai")
 from cora.config import ReviewerConfig
 from cora.core import config as c
 
-
 # ── The default self-disarms ─────────────────────────────────────────
 
 
@@ -106,7 +105,7 @@ def _wire(monkeypatch, *, probe):
 
     monkeypatch.setattr("cora.core.loop_logging.iter_with_turn_logging", _noop_iter)
     monkeypatch.setattr(
-        "cora.core.litellm_capture.drain_captured_headers", lambda: {}
+        "cora.core.litellm_capture.drain_captured_headers", dict
     )
 
 
@@ -212,7 +211,7 @@ def test_t1_does_not_probe_an_unconfigured_server(monkeypatch):
 
     monkeypatch.setattr("cora.core.loop_logging.iter_with_turn_logging", _noop_iter)
     monkeypatch.setattr(
-        "cora.core.litellm_capture.drain_captured_headers", lambda: {}
+        "cora.core.litellm_capture.drain_captured_headers", dict
     )
 
     body, reason, tools = asyncio.run(

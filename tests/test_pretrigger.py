@@ -111,7 +111,7 @@ def test_warmup_models_default_mirrors_engine_constant():
 
     assert ReviewerConfig().pretrigger_warmup_models is _c.PRETRIGGER_WARMUP_MODELS
     assert pretrigger.PRETRIGGER_WARMUP_MODELS is _c.PRETRIGGER_WARMUP_MODELS
-    assert _c.PRETRIGGER_WARMUP_MODELS == frozenset()
+    assert frozenset() == _c.PRETRIGGER_WARMUP_MODELS
 
 
 def test_from_env_overrides_warmup_models_csv():

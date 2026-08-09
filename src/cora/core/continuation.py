@@ -28,23 +28,23 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any, Callable, Sequence
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from cora.config import ReviewerConfig
     from cora.core.mcp_sessions import McpServerSpec
     from cora.providers.git import GitProvider
 
+from cora.core import config as _c
+from cora.core.budget import resolve_run_usage, usage_tokens
 from cora.core.deep_review import (
     _WALL_TIME_WAIT_FOR_GRACE_S,
     _loaded_tool_names,
     _make_pydantic_ai_local_tools,
     _make_verdict_probe,
 )
-from cora.core import config as _c
-from cora.core.budget import resolve_run_usage, usage_tokens
 from cora.core.mcp_probe import probe_mcp_server as _probe_mcp_server
-
 
 # Continuation directive prepended as the new user turn after the
 # T0 messages. Frames the resumption explicitly so the model
@@ -197,7 +197,7 @@ async def continue_on_t1(
     web_fetch_headers: dict[str, str] | None = None,
     # Generic extra MCP sessions (from `MCP_SERVERS`) — same shape as
     # `deep_review_call`; see `cora.core.mcp_sessions`.
-    extra_sessions: "Sequence[McpServerSpec]" = (),
+    extra_sessions: Sequence[McpServerSpec] = (),
     allowed_tools: set[str],
     tool_arg_defaults: dict[str, dict[str, Any]] | None = None,
     # T1 gets a tighter iteration cap than T0 because the trajectory
@@ -224,10 +224,10 @@ async def continue_on_t1(
     # The run's ReviewerConfig — threaded into Deps so T1's tools/hooks
     # read the same config object T0 used. None keeps the legacy
     # behaviour (Deps default-constructs a mirror config).
-    cfg: "ReviewerConfig | None" = None,
+    cfg: ReviewerConfig | None = None,
     # Repo-introspection backend for the local grep_repo / git_show
     # tools — the SAME provider T0 used. None → LocalGitProvider.
-    git_provider: "GitProvider | None" = None,
+    git_provider: GitProvider | None = None,
 ) -> tuple[str, str | None, list[str]]:
     """Resume a wall-hit T0 run on the T1 endpoint with the prior
     message history carried forward.
@@ -335,7 +335,7 @@ async def continue_on_t1(
         # `prior_messages` is a list of ModelMessage (Request /
         # Response) — count the response-side TextPart + ToolCallPart
         # weight as a rough handoff size.
-        from pydantic_ai.messages import ToolCallPart, TextPart
+        from pydantic_ai.messages import TextPart, ToolCallPart
         for m in prior_messages:
             for part in getattr(m, "parts", []) or []:
                 if isinstance(part, TextPart):
@@ -562,7 +562,7 @@ async def continue_on_t1(
                     except Exception:  # noqa: BLE001
                         messages = []
                     redraw_from_turn = turn_counter[0]
-                except (WallTimeExceeded, asyncio.TimeoutError) as exc:
+                except (TimeoutError, WallTimeExceeded) as exc:
                     overshoot = (
                         getattr(exc, "overshoot_s", None)
                         if isinstance(exc, WallTimeExceeded)

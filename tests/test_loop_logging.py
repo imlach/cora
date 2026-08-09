@@ -78,14 +78,15 @@ def test_iter_with_turn_logging_extracts_tool_calls_and_summary():
         - log a `model_response thinking_chars=… text_chars=… …`
           summary
     """
-    from cora.core.loop_logging import iter_with_turn_logging
-    from pydantic_ai._agent_graph import ModelRequestNode, CallToolsNode
+    from pydantic_ai._agent_graph import CallToolsNode, ModelRequestNode
     from pydantic_ai.messages import (
         ModelResponse,
         TextPart,
         ThinkingPart,
         ToolCallPart,
     )
+
+    from cora.core.loop_logging import iter_with_turn_logging
 
     # Build a fake CallToolsNode with a ModelResponse carrying one
     # tool call + a thinking block + a small text part.
@@ -162,9 +163,10 @@ def test_iter_with_turn_logging_extracts_tool_calls_and_summary():
 def test_iter_with_turn_logging_soft_fails_on_tool_call_hook():
     """A raising `on_tool_call` hook shouldn't break the iteration —
     Budget tracking is soft-fail."""
-    from cora.core.loop_logging import iter_with_turn_logging
     from pydantic_ai._agent_graph import CallToolsNode
     from pydantic_ai.messages import ModelResponse, ToolCallPart
+
+    from cora.core.loop_logging import iter_with_turn_logging
 
     def explode(_name):
         raise RuntimeError("boom")

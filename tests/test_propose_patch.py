@@ -12,10 +12,9 @@ from __future__ import annotations
 
 import pytest
 
-import cora.core as a   # diff parser + hunk helpers + suggestion-body formatter
+import cora.core as a  # diff parser + hunk helpers + suggestion-body formatter
 import cora.core.propose_patch as p  # shared directive shape (parser / validator / slugifier)
 from cora.core.pr_context import is_bot_author, is_fork_pr
-
 
 # ---------------------------------------------------------------------------
 # parse_propose_patch_directive

@@ -13,7 +13,6 @@ import os
 from datetime import datetime
 
 from cora.core.budget import Budget
-
 from cora.core.check_run import _grafana_drilldown_url, _workflow_run_url
 from cora.core.comment import _fmt_ts
 from cora.core.config import COMMENT_MARKER

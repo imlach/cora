@@ -25,7 +25,8 @@ look at manually — but no cloud call fires.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Sequence
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any
 
 from cora.core.disagreement import Resolution
 
@@ -54,7 +55,7 @@ async def call_t2_alt_reviewer(
     web_fetch_headers: dict[str, str] | None = None,
     # Generic extra MCP sessions (from `MCP_SERVERS`) — forwarded
     # straight through to `deep_review_call`; see `cora.core.mcp_sessions`.
-    extra_sessions: "Sequence[McpServerSpec]" = (),
+    extra_sessions: Sequence[McpServerSpec] = (),
     allowed_tools: set[str],
     tool_arg_defaults: dict[str, dict[str, Any]] | None = None,
     max_iterations: int = 8,
@@ -62,10 +63,10 @@ async def call_t2_alt_reviewer(
     # The run's ReviewerConfig — forwarded to `deep_review_call` so the
     # T2 leg reads the same config object the primary tiers used. None
     # keeps the legacy behaviour exactly.
-    cfg: "ReviewerConfig | None" = None,
+    cfg: ReviewerConfig | None = None,
     # Repo-introspection backend, forwarded to `deep_review_call`'s
     # local grep_repo / git_show tools. None → LocalGitProvider.
-    git_provider: "GitProvider | None" = None,
+    git_provider: GitProvider | None = None,
 ) -> tuple[str, str | None, list[str]]:
     """Fire a T2 second-opinion review on the alt-reviewer endpoint.
 

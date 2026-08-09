@@ -380,14 +380,14 @@ def test_resolve_returns_empty_when_neither_configured():
 
 
 def _compose(**kw):
-    base = dict(
-        mcp_url="https://mcp.example",
-        mcp_headers={},
-        mcp_actions_url=None,
-        mcp_actions_headers=None,
-        web_fetch_url=None,
-        web_fetch_headers=None,
-    )
+    base = {
+        "mcp_url": "https://mcp.example",
+        "mcp_headers": {},
+        "mcp_actions_url": None,
+        "mcp_actions_headers": None,
+        "web_fetch_url": None,
+        "web_fetch_headers": None,
+    }
     base.update(kw)
     return compose_mcp_sessions(**base)
 

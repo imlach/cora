@@ -50,7 +50,7 @@ class RetrievalProvider(ABC):
         return _r.format_retrieved_docs(docs)
 
     @classmethod
-    def from_config(cls, cfg: "ReviewerConfig") -> "RetrievalProvider":
+    def from_config(cls, cfg: ReviewerConfig) -> RetrievalProvider:
         """Pick a provider from config. Defaults to `NullRetrievalProvider`
         unless a full Qdrant+TEI endpoint set AND an API key are configured
         (the hybrid pipeline) or local glob retrieval is opted
@@ -112,7 +112,7 @@ class GlobRetrievalProvider(RetrievalProvider):
         doc_char_cap: int = _c.RETRIEVAL_DOC_CHAR_CAP,
         max_files: int = _c.RETRIEVAL_GLOB_MAX_FILES,
         max_file_bytes: int = _c.RETRIEVAL_GLOB_MAX_FILE_BYTES,
-        cfg: "ReviewerConfig | None" = None,
+        cfg: ReviewerConfig | None = None,
     ) -> None:
         self.include = include
         self.root = root if root is not None else _c.REPO_ROOT
@@ -152,7 +152,7 @@ class GlobRetrievalProvider(RetrievalProvider):
     ) -> tuple[list[dict], dict]:
         query = _r.build_retrieval_query(metadata, diff_text, cfg=self.cfg)
         q_idx, q_val = _bm25_sparse(query["text"])
-        q_vec = dict(zip(q_idx, q_val))
+        q_vec = dict(zip(q_idx, q_val, strict=False))
         trace: dict = {
             "provider": "glob",
             "root": str(self.root),
@@ -175,7 +175,7 @@ class GlobRetrievalProvider(RetrievalProvider):
             except OSError:
                 continue
             d_idx, d_val = _bm25_sparse(body)
-            score = sum(q_vec.get(i, 0.0) * v for i, v in zip(d_idx, d_val))
+            score = sum(q_vec.get(i, 0.0) * v for i, v in zip(d_idx, d_val, strict=False))
             if score > 0.0:
                 scored.append((score, path, body))
 
@@ -225,7 +225,7 @@ class TeiQdrantRetrievalProvider(RetrievalProvider):
         reranker_url: str,
         repo_root: Path | None = None,
         top_k: int = _c.RETRIEVAL_TOP_K,
-        cfg: "ReviewerConfig | None" = None,
+        cfg: ReviewerConfig | None = None,
     ) -> None:
         self.qdrant_url = qdrant_url
         self.qdrant_api_key = qdrant_api_key

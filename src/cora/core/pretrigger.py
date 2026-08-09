@@ -65,8 +65,8 @@ def _post(url: str, api_key: str, model: str, pr_number: str, timeout_s: float) 
         # can opt into waiting for the tiny request to actually reach the
         # restored backend, hiding first-request JIT behind classifier work.
         urllib.request.urlopen(req, timeout=timeout_s)
-    except Exception:
-        pass  # best-effort — never raise into the review path
+    except Exception:  # noqa: BLE001 — best-effort warmup
+        pass  # never raise into the review path
 
 
 async def fire_pretrigger(

@@ -89,7 +89,7 @@ def gather_ci_context(
     repo: str,
     head_sha: str | None,
     *,
-    cfg: "ReviewerConfig | None" = None,
+    cfg: ReviewerConfig | None = None,
 ) -> str | None:
     """Fetch the PR head commit's failing CI checks and a bounded tail of
     each failing job's log, rendered as a markdown block to fold into the
@@ -308,7 +308,7 @@ def fetch_thread_evidence(
     repo: str,
     pr_number: str,
     *,
-    cfg: "ReviewerConfig | None" = None,
+    cfg: ReviewerConfig | None = None,
 ) -> str | None:
     """Recent maintainer comments on the PR, rendered as an
     `<untrusted-content>`-wrapped prompt section, or None.

@@ -57,7 +57,8 @@ import json
 import re
 import secrets
 import subprocess
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from cora.config import ReviewerConfig
@@ -115,7 +116,7 @@ def parse_linked_issues(
     body: str,
     *,
     repo: str,
-    cfg: "ReviewerConfig | None" = None,
+    cfg: ReviewerConfig | None = None,
     limit: int | None = None,
 ) -> list[int]:
     """Extract same-repo issue numbers referenced in a PR's title+body.
@@ -203,7 +204,7 @@ def fetch_issue(
     repo: str,
     number: int,
     *,
-    cfg: "ReviewerConfig | None" = None,
+    cfg: ReviewerConfig | None = None,
     run_gh: Callable[[list[str]], str | None] = _run_gh,
 ) -> dict | None:
     """Fetch one issue's title/state/body + earliest comments via
@@ -287,7 +288,7 @@ def fetch_issue(
 def format_issue_context_block(
     issues: list[dict],
     *,
-    cfg: "ReviewerConfig | None" = None,
+    cfg: ReviewerConfig | None = None,
 ) -> str:
     """Render fetched issues (`fetch_issue` dicts) into one markdown
     block bounded by the aggregate char cap. Prefers body over
@@ -396,7 +397,7 @@ def wrap_issue_context_block(
     )
 
 
-def local_read_issue(args: dict, *, repo: str, cfg: "ReviewerConfig | None" = None) -> str:
+def local_read_issue(args: dict, *, repo: str, cfg: ReviewerConfig | None = None) -> str:
     """`read_issue` tool handler — same call shape as
     `repo_tools.local_grep_repo` / `local_git_show` (single `args`
     dict, string envelope, `ERROR:`-prefixed failures): `{"number":

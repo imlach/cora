@@ -17,7 +17,6 @@ from cora.core.transcript import (
     trajectory_to_messages,
 )
 
-
 # --- stand-in builders (mirror pydantic-ai's part shapes) ------------------
 
 def _req(*parts):
@@ -194,9 +193,7 @@ def test_row_requires_final_text():
     assert build_trajectory_row(truncated) is None
 
     # ends on an assistant turn that is *only* a tool call → rejected
-    dangling = truncated + [
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "z"}]}
-    ]
+    dangling = [*truncated, {"role": "assistant", "content": "", "tool_calls": [{"id": "z"}]}]
     assert build_trajectory_row(dangling) is None
 
 

@@ -104,13 +104,13 @@ def _glob_tree(tmp_path: Path) -> Path:
 
 
 def _pr_query_kwargs() -> dict:
-    return dict(
-        repo="o/r",
-        pr_number="7",
-        head_sha="abc",
-        metadata={"title": "fix litellm gateway rollback", "body": ""},
-        diff_text="diff --git a/k8s/litellm/configmap.yml b/...\n+gateway: rollback\n",
-    )
+    return {
+        "repo": "o/r",
+        "pr_number": "7",
+        "head_sha": "abc",
+        "metadata": {"title": "fix litellm gateway rollback", "body": ""},
+        "diff_text": "diff --git a/k8s/litellm/configmap.yml b/...\n+gateway: rollback\n",
+    }
 
 
 def test_glob_provider_ranks_relevant_doc_first(tmp_path):
