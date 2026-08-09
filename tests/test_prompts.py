@@ -60,3 +60,21 @@ def test_deep_prompt_pins_unverified_finding_rules():
     assert "Check it isn't already there" in text
     assert "Validate any claim" in text
     assert "≤2 tool calls" not in text
+
+
+@pytest.mark.parametrize("mode", ["deep", "quick"])
+def test_prompts_forbid_version_nonexistence_blockers(mode):
+    """cora #37: the reviewer blocked a PR asserting "Node 26 does not
+    exist (latest LTS is 22)" while the PR's own job log showed 26.7.0
+    installed, then re-asserted it verbatim on re-review.
+
+    A version absent from the weights is the *expected* look of a
+    release made after the cutoff, so this class can never be settled
+    from memory. The existing library-API and version-boundary rules
+    cover how a pinned version *behaves*, not whether it exists — pin
+    the existence rule separately so an edit collapsing them trips CI."""
+    text = load_system_prompt(None, mode=mode)
+    assert "does not exist" in text or "doesn't exist" in text
+    assert "cutoff" in text
+    # The rule is worthless if it doesn't bind the verdict.
+    assert "Blocker" in text

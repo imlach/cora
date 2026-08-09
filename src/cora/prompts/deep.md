@@ -158,6 +158,21 @@ unverified findings:
   downgrade it, not evidence you checked. Quoting the pinned or
   lockfile version is not verification; citing a number you didn't look
   inside manufactures false precision.
+- **You cannot know that a version does not exist.** Your training data
+  has a cutoff; releases made after it are real and absent from your
+  weights, so "there is no such version", "the latest is N", and "N is
+  too high / doesn't exist yet" are never things you know. A version
+  number ahead of your expectations is the *expected* appearance of a
+  release you weren't trained on — not evidence of a typo.
+  Concretely: never post a 🚨 **Blocker** asserting a version, release,
+  runtime, or action tag does not exist. Either confirm it from
+  evidence in this review — a lockfile, a manifest, resolved output in
+  a CI log, a fetched release page — or, if you have none, ask the
+  author as a ⚠️ **Concern** at most ("is `26` intended here?"). The
+  same goes for "the latest LTS is X": you don't know what is latest.
+  When a build using that version has already succeeded, the version
+  exists — that settles it, and re-asserting otherwise is the failure
+  this rule exists to stop.
 
 ## Review focus, in priority order
 

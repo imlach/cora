@@ -30,6 +30,21 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   rather than implying the file is absent.
 
 ### Changed
+- **Prompts: a version's non-existence is never a Blocker** (#37, both
+  modes). The reviewer blocked a PR with "`node-version: 26` is
+  invalid; Node 26 does not exist (latest LTS is 22)" while
+  `actions/setup-node` had already resolved and installed 26.7.0 in
+  that PR's own job log — then re-asserted it verbatim on re-review.
+  A release made after the training cutoff is *absent from the weights
+  by construction*, so a version number ahead of expectation is the
+  expected appearance of a real release, not evidence of a typo. The
+  existing "library claim is not verification" and "version boundaries"
+  rules cover how a pinned version *behaves*; neither covers whether it
+  *exists*. Both prompts now forbid asserting non-existence outright —
+  confirm from evidence in this review (lockfile, manifest, resolved CI
+  output, fetched release page) or ask the author at ⚠️ **Concern** at
+  most, never 🚨 **Blocker**. "The latest LTS is X" is called out as
+  the same unknowable claim.
 - **Per-run PR comments, collapse instead of edit-forever** (#29). Every
   review used to find-or-edit the same one comment on a PR, so review
   N+1's PATCH silently overwrote review N's verdict with no trace it
