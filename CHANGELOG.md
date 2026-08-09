@@ -8,6 +8,8 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-08-09
+
 ### Added
 - **`no_tool_use` escalation trigger.** A deep review can verdict without
   making a single tool call — observed on the same PR, same prompt, same
@@ -612,7 +614,8 @@ evolution summarised below and in the module docstrings.
   embed the `Authorization` header value; header values are redacted and
   the message is length-capped.
 
-[Unreleased]: https://github.com/imlach/cora/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/imlach/cora/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/imlach/cora/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/imlach/cora/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/imlach/cora/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/imlach/cora/compare/v0.1.3...v0.1.4
