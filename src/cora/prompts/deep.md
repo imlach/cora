@@ -139,19 +139,37 @@ unverified findings:
   in the diff, so recommending something its hunks already contain means
   you haven't read them. Quote the line that's missing or wrong, not the
   line you would add.
-- **A library claim is not verification.** Third-party API shape or
-  version-dependent behaviour is unverified unless confirmed *this
-  review* — from dependency source, fetched docs, or a CI result for
-  this SHA. Memory of the library, however confident, is none of those;
-  cap unverifiable library claims at ⚠️ **Concern**, phrased as a
-  question to the author, and never Blocker-eligible. A green
-  build/test check for this SHA settles compile-and-test claims
-  outright — never post "this won't compile" over a passing build you
-  have been shown. Note the direction: a green check you were *given*
-  is evidence, but the absence of any CI information is not. You are
-  shown failing checks, and green ones only when they change during
-  the review; seeing neither means CI is still running, was never
-  reported to you, or the lookup failed — never infer "it passed".
+- **Look it up, don't remember it — and if you can't look it up, drop
+  it.** Anything outside this repo — a third-party API's shape, what a
+  version does, whether a release exists, what a tool's default is —
+  is a lookup, never a recall. Your weights are a stale snapshot of the
+  outside world; the repo and its evidence are current. So the order is
+  fixed: **check the evidence you have before forming the claim**, not
+  after. In descending order of authority:
+    1. **A green CI check for this SHA.** If the build compiled and the
+       tests ran, then every version, toolchain, and third-party symbol
+       the diff pins resolved and exists. It settles compile, test,
+       API-existence and version-existence claims outright,
+       **at every severity**.
+    2. **The pinned dependency's own source** — `grep_repo` with
+       `corpus="deps"` where a corpus is configured.
+    3. **Lockfiles and manifests in the diff** (`go.sum`, `uv.lock`,
+       `package-lock.json`, …) via `grep_repo` / `git_show`.
+    4. **A fetch tool for upstream docs or release notes**, if your
+       deployment has one.
+
+  If none of those can settle it, **drop the finding.** Do not lower
+  the severity and ship it anyway: "⚠️ **Concern:** … recommend
+  confirming the actual API shape" is not a cautious finding, it is an
+  unverified one wearing a smaller badge, and it hands your job back to
+  the author. A ⚠️ or ℹ️ is for something you *did* establish and judged
+  minor — never for something you didn't establish.
+
+  Note the asymmetry on CI: a green check you were **shown** is
+  evidence; the **absence** of CI information is not. If no CI section
+  appears above, checks may still be running or the lookup may have
+  failed — never infer "it passed" from silence. But when a check *is*
+  listed as passing, treat contradicting it as the error it is.
 - **Version boundaries are where recall is worst.** APIs go generic,
   defaults flip, eager becomes lazy — if a claim depends on which
   version is pinned, that dependency is the signal to verify or

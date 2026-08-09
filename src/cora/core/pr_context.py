@@ -16,7 +16,12 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from cora.core.config import CHECK_RUN_NAME, CI_CONTEXT_CHAR_CAP, CI_LOG_TAIL_CHARS
+from cora.core.config import (
+    CHECK_RUN_NAME,
+    CI_CONTEXT_CHAR_CAP,
+    CI_CONTEXT_INCLUDE_PASSING,
+    CI_LOG_TAIL_CHARS,
+)
 
 if TYPE_CHECKING:
     from cora.config import ReviewerConfig
@@ -133,18 +138,61 @@ def gather_ci_context(
     # output too — same feedback-loop exclusion as the legacy pre-rename
     # prefix, which stays until no live PR carries old-name check runs.
     own_check = cfg.check_run_name if cfg is not None else CHECK_RUN_NAME
+
+    def _relevant(name: str) -> bool:
+        return (
+            not name.startswith("agentic-pr-review")
+            and name != own_check
+            and name != "required"
+        )
+
     failing = sorted(
         (
             cr for name, cr in latest.items()
-            if cr.get("conclusion") in bad
-            and not name.startswith("agentic-pr-review")
-            and name != own_check
-            and name != "required"
+            if cr.get("conclusion") in bad and _relevant(name)
         ),
         key=lambda cr: cr.get("name", ""),
     )
+    # Passing checks for THIS head SHA. Withholding these is what made a
+    # green PR the reviewer's blindest case (cora #44): `gather_ci_context`
+    # returned None whenever nothing was red, and `deep.md` correctly
+    # forbids inferring success from silence — so on an all-green PR the
+    # model saw no CI at all and asserted compile/version failures that the
+    # build had already disproved. Names + conclusions only, no logs: the
+    # evidentiary weight is entirely in "this check is green at this SHA",
+    # and a green job's log is noise the context budget shouldn't carry.
+    include_passing = (
+        cfg.ci_context_include_passing if cfg is not None
+        else CI_CONTEXT_INCLUDE_PASSING
+    )
+    passing = sorted(
+        (
+            name for name, cr in latest.items()
+            if cr.get("conclusion") == "success" and _relevant(name)
+        )
+    ) if include_passing else []
+
     if not failing:
-        return None
+        if not passing:
+            # Genuinely no signal — no checks reported for this SHA. Stay
+            # None so the prompt's "absence of CI information is not
+            # evidence" rule keeps holding.
+            return None
+        return (
+            "## CI status — all reported checks passing\n"
+            "\n"
+            f"Every check that has reported for this PR's head commit "
+            f"({head_sha[:7]}) is green:\n"
+            "\n"
+            + "\n".join(f"- `{n}` — success" for n in passing)
+            + "\n\nThis is evidence about THIS commit, and it settles "
+            "claims that the code fails to build, fails its tests, or "
+            "references an API or version that does not exist — a green "
+            "build is proof the toolchain resolved and compiled what the "
+            "diff pins. Do not raise such a claim at ANY severity over a "
+            "check listed above. Checks still running are not listed, so "
+            "this is not proof the whole suite is green."
+        )
 
     parts = [
         "## CI status — failing checks",
@@ -177,6 +225,20 @@ def gather_ci_context(
             parts += ["", "```", excerpt[:per_check], "```"]
         if url:
             parts.append(f"[check details]({url})")
+    if passing:
+        # Mixed state: some red, some green. The green ones still settle
+        # build/version claims about the areas they cover, so name them
+        # rather than letting a red neighbour imply everything is broken.
+        parts += [
+            "",
+            "### Passing on this commit",
+            "",
+            ", ".join(f"`{n}`" for n in passing),
+            "",
+            "These are green at this head commit — do not claim, at any "
+            "severity, that the code fails to build or references a "
+            "nonexistent API or version in the areas they cover.",
+        ]
     return "\n".join(parts)[:ci_context_char_cap + 2_000]
 
 

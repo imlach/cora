@@ -109,6 +109,7 @@ error.
 | --- | --- |
 | `AGENT_REVIEW_CI_VERDICT_GATE` | Default-true kill switch for the finalize-time CI-verdict gate |
 | `AGENT_REVIEW_RETRACTION_VERDICT_GATE` | Default-true kill switch for the retraction-verdict gate — downgrades `needs changes` to `minor` when every 🚨 Blocker finding withdraws itself in its own text. Findings are kept and annotated, never deleted |
+| `AGENT_REVIEW_CI_CONTEXT_PASSING` | Default-true kill switch for listing **passing** check names in the CI context block. Passing checks are the reviewer's counter-evidence against compile / version / API-existence claims; withholding them made an all-green PR its blindest case |
 Linked-issue prefetch — fetching the issue(s) a PR's title/body
 references (via a closing keyword like `fixes #12` or a bare `#N`
 mention) and injecting title/state/body/earliest-comments into the

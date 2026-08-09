@@ -73,6 +73,17 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   pinned test documents that. The durable fix is upstream, in what the
   model emits; #38 stays open for it.
 ### Changed
+- **Prompts: look it up, don't remember it** (#44, both modes). The old
+  rule capped unverifiable third-party claims at ⚠️ **Concern**, which
+  the model satisfied by shipping the same wrong claim one severity
+  lower with "recommend confirming" attached — handing verification back
+  to the author, which "Verify before you flag" already forbids. The
+  rule is now a positive default with an explicit evidence order (green
+  CI for this SHA → pinned dependency source → lockfiles and manifests →
+  a fetch tool, if the deployment has one), and an explicit floor: if
+  none of those can settle it, **drop the finding** rather than lowering
+  its severity. A ⚠️ or ℹ️ is for something you did establish and judged
+  minor, never for something you didn't establish.
 - **Prompts: a version's non-existence is never a Blocker** (#37, both
   modes). The reviewer blocked a PR with "`node-version: 26` is
   invalid; Node 26 does not exist (latest LTS is 22)" while
@@ -145,6 +156,24 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   single-edited-comment engine, so it can ship first.
 
 ### Fixed
+- **The reviewer can see passing CI, so world-knowledge claims have
+  counter-evidence** (#44). Observed downstream: a deep review made
+  **zero tool calls** and posted three findings — "`go 1.26.5` is not a
+  valid Go version … this will cause `go build` to fail", a claim about
+  a function it never read, and "if these options don't exist,
+  compilation will fail. Recommend confirming". The build check for that
+  SHA was green, so all three were already refuted. Two
+  individually-correct behaviours composed into the blind spot:
+  `gather_ci_context` returned `None` whenever nothing was failing, and
+  `deep.md` rightly forbids inferring success from silence — so the
+  greener the PR, the less the reviewer knew. The CI block now also
+  lists **passing** check names for the head SHA (names + conclusions
+  only; a green job's log is noise), on both the all-green and mixed
+  paths, and states that a green check settles compile / test /
+  API-existence / version-existence claims at **any** severity. The
+  silence asymmetry is preserved: no CI section still means unknown,
+  never "it passed", and a SHA with no reported checks still yields
+  `None`. Default on; `AGENT_REVIEW_CI_CONTEXT_PASSING=false` disables.
 - **A crashed review no longer leaves its PR comment reading "in
   progress" forever** (#14). Every *handled* terminal path finalizes
   the "🔄 Reviewing PR … this comment will update with the verdict"

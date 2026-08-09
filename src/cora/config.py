@@ -204,6 +204,7 @@ class ReviewerConfig:
     claude_md_char_cap: int = _c.CLAUDE_MD_CHAR_CAP
     pr_body_char_cap: int = _c.PR_BODY_CHAR_CAP
     ci_context_char_cap: int = _c.CI_CONTEXT_CHAR_CAP
+    ci_context_include_passing: bool = _c.CI_CONTEXT_INCLUDE_PASSING
     ci_log_tail_chars: int = _c.CI_LOG_TAIL_CHARS
 
     # ── Linked-issue prefetch (server-side fetch of PR-referenced
@@ -518,6 +519,10 @@ class ReviewerConfig:
             # Retraction-verdict gate — same default-true killswitch shape.
             retraction_verdict_gate=getflag_on(
                 "AGENT_REVIEW_RETRACTION_VERDICT_GATE"
+            ),
+            # Passing-check context — same default-true killswitch shape.
+            ci_context_include_passing=getflag_on(
+                "AGENT_REVIEW_CI_CONTEXT_PASSING"
             ),
             # Linked-issue prefetch — default-true killswitch, same
             # typo-safe shape as the context-injection switches above.
