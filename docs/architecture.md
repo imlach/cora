@@ -39,7 +39,7 @@ cora keeps deployment-specific behavior behind replaceable interfaces:
 | Seam | Purpose |
 | --- | --- |
 | `RetrievalProvider` | Supplies extra context, from no-op to local glob/BM25 to TEI/Qdrant retrieval |
-| `GitProvider` | Provides read-only repository lookups for tools such as `grep_repo` and `git_show` |
+| `GitProvider` | Provides read-only repository lookups for tools such as `grep_repo` (content), `list_files` (paths), and `git_show` |
 | `Reporter` | Owns side effects such as GitHub comments, check-runs, review comments, and patch suggestions |
 | `SecondOpinion` | Optionally runs an independent model and folds verdict disagreement into the final result |
 

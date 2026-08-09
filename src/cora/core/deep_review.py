@@ -234,10 +234,35 @@ def _make_pydantic_ai_local_tools(
             return stub
         return provider.git_show({"ref": ref, "path": path})
 
+    async def list_files(glob: str | None = None) -> str:
+        """List file PATHS at THIS PR's state. This is the tool for
+        "does `<path>` exist?" — `grep_repo` searches file CONTENT, so
+        an empty grep result is NOT evidence that a path is absent.
+        Before writing any finding that says a file is missing, confirm
+        it here.
+
+        Args:
+            glob: Optional fnmatch glob against the full repo-relative
+                path — `"tests/fixtures/*"` for a subtree, `"*/conf.py"`
+                for a basename anywhere, `"tests/fixtures/foo.jsonl"`
+                for one exact path. Omit to list the whole repo
+                (capped; the result says so when it truncates).
+        """
+        stub = _dedup(("list_files", glob))
+        if stub is not None:
+            return stub
+        return provider.list_files({"glob": glob})
+
     tools = [
         Tool(grep_repo, name="grep_repo"),
         Tool(git_show, name="git_show"),
     ]
+
+    repo_tool_names = (
+        cfg.local_repo_tools if cfg is not None else _c.LOCAL_REPO_TOOLS
+    )
+    if "list_files" in repo_tool_names:
+        tools.append(Tool(list_files, name="list_files"))
 
     issue_tools = cfg.local_issue_tools if cfg is not None else _c.LOCAL_ISSUE_TOOLS
     if repo and "read_issue" in issue_tools:

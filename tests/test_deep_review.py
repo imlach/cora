@@ -25,12 +25,13 @@ pytest.importorskip("pydantic_ai.mcp")
 def test_local_tools_have_expected_names():
     """The Pydantic-AI Tool wrappers expose the same `grep_repo` /
     `git_show` names as the MCP-server originals, so the model's
-    learned tool use carries over from when those were MCP-only."""
+    learned tool use carries over from when those were MCP-only.
+    `list_files` is local-only (cora #36) — it has no MCP twin."""
     from cora.core.deep_review import _make_pydantic_ai_local_tools
 
     tools = _make_pydantic_ai_local_tools(tool_arg_defaults=None)
     names = sorted(t.name for t in tools)
-    assert names == ["git_show", "grep_repo"]
+    assert names == ["git_show", "grep_repo", "list_files"]
 
 
 def test_local_tools_callable_returns_handler_output(tmp_path, monkeypatch):

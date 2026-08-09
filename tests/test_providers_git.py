@@ -93,8 +93,9 @@ def test_git_show_delegates_with_provider_root(monkeypatch, tmp_path: Path):
 
 
 def test_deep_review_local_tools_route_through_injected_provider():
-    """The engine's grep_repo / git_show agent tools go through the
-    GitProvider seam — an injected provider is what they call."""
+    """The engine's grep_repo / git_show / list_files agent tools go
+    through the GitProvider seam — an injected provider is what they
+    call."""
     import asyncio
 
     from cora.core.deep_review import _make_pydantic_ai_local_tools
@@ -111,15 +112,21 @@ def test_deep_review_local_tools_route_through_injected_provider():
             self.calls.append(("show", args))
             return "SHOW_OUT"
 
+        def list_files(self, args: dict) -> str:
+            self.calls.append(("list", args))
+            return "LIST_OUT"
+
     spy = _SpyGit()
     tools = _make_pydantic_ai_local_tools(None, git_provider=spy)
     by = {t.name: t for t in tools}
-    assert set(by) == {"grep_repo", "git_show"}
+    assert set(by) == {"grep_repo", "git_show", "list_files"}
     # Tool.function is the wrapped async callable; invoke it directly.
     assert asyncio.run(by["grep_repo"].function(pattern="x")) == "GREP_OUT"
     assert asyncio.run(by["git_show"].function(ref="HEAD", path="f.py")) == "SHOW_OUT"
     assert spy.calls[0][0] == "grep" and spy.calls[0][1]["pattern"] == "x"
+    assert asyncio.run(by["list_files"].function(glob="a/*")) == "LIST_OUT"
     assert ("show", {"ref": "HEAD", "path": "f.py"}) in spy.calls
+    assert ("list", {"glob": "a/*"}) in spy.calls
 
 
 # ── grep_repo(corpus="deps") dispatch on LocalGitProvider ─────────────
