@@ -590,7 +590,13 @@ READ_TOOLS = {
 # checked out at REPO_ROOT — grep/show that and the answers reflect the
 # code actually under review. Registered as agent-loop local tools; they
 # shadow the MCP server's same-named copies.
-LOCAL_REPO_TOOLS = {"grep_repo", "git_show"}
+# `list_files` joined them for cora #36: `grep_repo` matches content, so
+# an empty result never proved a path absent, and the model had nothing
+# correct to reach for when checking existence — it content-grepped and
+# read zero matches as "the file is missing" (an observed false 🔴).
+# Deployments that want the pre-#36 palette can drop the name via
+# `LOCAL_REPO_TOOLS`; registration is membership-gated.
+LOCAL_REPO_TOOLS = {"grep_repo", "git_show", "list_files"}
 
 # `read_issue` — an in-process pull tool alongside grep_repo/git_show,
 # served from `core/issue_context.py` instead of the local git checkout

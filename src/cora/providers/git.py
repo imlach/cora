@@ -1,10 +1,15 @@
 """Git/SCM providers — how cora introspects the repo under review.
 
-`grep_repo` and `git_show` are the two repo-introspection tools the agent
-calls. `LocalGitProvider` serves them from a local checkout (the PR merge
-tree), so existence checks reflect the code actually under review rather
-than a `main`-branch mirror — and it's all an adopter running cora in CI
-needs. The seam lets a future provider back these with an SCM API instead.
+`grep_repo`, `list_files`, and `git_show` are the repo-introspection
+tools the agent calls. `LocalGitProvider` serves them from a local
+checkout (the PR merge tree), so existence checks reflect the code
+actually under review rather than a `main`-branch mirror — and it's all
+an adopter running cora in CI needs. The seam lets a future provider
+back these with an SCM API instead.
+
+`list_files` is path-level; `grep_repo` is content-level. Keeping them
+distinct is the point (cora #36) — grep's `glob` only narrows what gets
+searched, so it can never answer "does this path exist".
 
 `LocalGitProvider` also serves `grep_repo`'s second corpus
 (`corpus="deps"`, cora issue #23) over the deployment's resolved
@@ -22,7 +27,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cora.core import config as _c
-from cora.core.repo_tools import local_git_show, local_grep_deps, local_grep_repo
+from cora.core.repo_tools import (
+    local_git_show,
+    local_grep_deps,
+    local_grep_repo,
+    local_list_files,
+)
 
 if TYPE_CHECKING:
     from cora.config import ReviewerConfig
@@ -94,6 +104,19 @@ class GitProvider(ABC):
     @abstractmethod
     def git_show(self, args: dict) -> str: ...
 
+    def list_files(self, args: dict) -> str:
+        """Path-level existence/listing (cora #36). Deliberately NOT
+        abstract: adding an abstractmethod would break every existing
+        third-party `GitProvider` subclass at import. A provider that
+        can't list paths inherits this, and the tool reports the gap
+        instead of the engine failing — same soft-fail posture as an
+        unconfigured deps corpus."""
+        return (
+            "list_files is not supported by this GitProvider — path "
+            "existence cannot be checked here. Do not treat that as "
+            "evidence a file is missing."
+        )
+
     @classmethod
     def from_config(cls, cfg: "ReviewerConfig") -> "GitProvider":
         """`LocalGitProvider` is the only implementation today (serves the
@@ -139,6 +162,9 @@ class LocalGitProvider(GitProvider):
                 f"(got {corpus!r})"
             )
         return local_grep_repo(args, root=self.repo_root)
+
+    def list_files(self, args: dict) -> str:
+        return local_list_files(args, root=self.repo_root)
 
     def git_show(self, args: dict) -> str:
         return local_git_show(args, root=self.repo_root)

@@ -1,5 +1,5 @@
-"""Local grep_repo + git_show handlers served in-process from the
-CI runner's PR checkout (`REPO_ROOT`).
+"""Local grep_repo + list_files + git_show handlers served in-process
+from the CI runner's PR checkout (`REPO_ROOT`).
 
 The MCP server's grep_repo / git_show read a `main`-branch mirror —
 they go PR-blind on files the PR adds. Serving these locally from
@@ -16,6 +16,11 @@ share validation (`_parse_grep_query`) and per-entry match building,
 but walk separately: the repo corpus has exactly one root and skips
 `node_modules`/`.venv`/`venv` as build noise, while the deps corpus has
 one-or-many roots where those same directories ARE the corpus.
+
+`list_files` (`local_list_files`) answers the question grep cannot:
+grep matches file CONTENT, so an empty result is not evidence a path is
+absent, and reading it that way produced false "file missing" blockers
+(cora #36). Path-level existence needs a path-level tool.
 
 All handlers take a single `args: dict` for parity with the MCP-server
 call shape; `deep_review._make_pydantic_ai_local_tools` wraps them as
@@ -67,6 +72,12 @@ _GREP_HARD_MAX_COUNT = 500
 _GREP_CONTEXT_MAX = 5
 _GREP_LINE_MAX = 512
 _GREP_FILE_SIZE_MAX = 2 * 1024 * 1024  # 2 MiB — bounds worst-case scan cost
+
+# `list_files` result ceiling. Paths are short, so this is generous
+# relative to `_GREP_HARD_MAX_COUNT` — the point of the tool is to
+# answer "does this path exist" and "what's in this directory", and a
+# truncated listing can't answer the second one honestly.
+_LIST_FILES_MAX = 1000
 
 
 def _cap_content(text: str, cap: int = 0) -> tuple[str, bool]:
@@ -280,6 +291,71 @@ def local_grep_repo(args: dict, *, root: Path | None = None) -> str:
         out["note"] = (
             "glob selected zero files — it is fnmatch'd against the full "
             "repo-relative path; use 'dir/*' for a subtree or check the path"
+        )
+    return json.dumps(out, indent=2)
+
+
+def local_list_files(args: dict, *, root: Path | None = None) -> str:
+    """List repo-relative PATHS at this PR's state (`corpus="repo"` only).
+
+    The existence tool. `grep_repo` matches file CONTENT — its `glob`
+    only filters which files get searched — so an empty grep result says
+    nothing about whether a path exists, and reading it as proof of
+    absence produced false "file missing" blockers (cora #36). There was
+    no correct tool to reach for; this is it.
+
+    Same skip-dirs / skip-extensions / binary rules as `local_grep_repo`
+    so the two agree on what "in the repo" means. Unglobbed listings are
+    capped at `_LIST_FILES_MAX` with `truncated` set — never silently."""
+    root = root if root is not None else REPO_ROOT
+    glob = (args.get("glob") or "").strip() or None
+    if glob and (os.path.isabs(glob) or ".." in glob.split("/")):
+        return (
+            f"ERROR: list_files: glob {glob!r} must be repo-relative "
+            "and may not contain '..'"
+        )
+    if glob:
+        glob = _normalize_glob(glob, root)
+
+    paths: list[str] = []
+    truncated = False
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _GREP_SKIP_DIRS]
+        if truncated:
+            break
+        for fn in sorted(filenames):
+            if os.path.splitext(fn)[1].lower() in _GREP_SKIP_EXT:
+                continue
+            rel_path = os.path.relpath(Path(dirpath) / fn, root)
+            if glob and not fnmatch.fnmatch(rel_path, glob):
+                continue
+            paths.append(rel_path)
+            if len(paths) >= _LIST_FILES_MAX:
+                truncated = True
+                break
+
+    paths.sort()
+    out = {
+        "glob": glob,
+        "ref": "PR branch (merge ref) — the code under review",
+        "paths": paths,
+        "count": len(paths),
+        "truncated": truncated,
+    }
+    if truncated:
+        out["note"] = (
+            f"listing capped at {_LIST_FILES_MAX} paths — narrow with a "
+            "glob; this is NOT the complete set of files"
+        )
+    elif glob and not paths:
+        # The one result that gets misread. Say plainly what it does and
+        # does not prove, because this is the tool a model reaches for
+        # when it is about to write "this file is missing".
+        out["note"] = (
+            "no path matches this glob at the PR's state — the glob is "
+            "fnmatch'd against the full repo-relative path, so check the "
+            "path shape ('dir/*' for a subtree, '*/name.py' for a "
+            "basename anywhere) before concluding the file is absent"
         )
     return json.dumps(out, indent=2)
 

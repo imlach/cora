@@ -123,7 +123,7 @@ Deep review can attach MCP servers and expose tool subsets.
 
 | Variable | Purpose |
 | --- | --- |
-| `MCP_URL` | Read-tool MCP server URL. **Unset self-disarms**: deep mode runs on the in-process `grep_repo`/`git_show` alone. Set but unreachable still fails the review — dropping tools you configured is the worse failure |
+| `MCP_URL` | Read-tool MCP server URL. **Unset self-disarms**: deep mode runs on the in-process `grep_repo`/`list_files`/`git_show` alone. Set but unreachable still fails the review — dropping tools you configured is the worse failure |
 | `MCP_TOKEN` | Token for the read-tool MCP server |
 | `MCP_ACTIONS_URL` | Actions MCP server URL |
 | `MCP_ACTIONS_TOKEN` | Token for the actions MCP server. Unset **skips** the actions session entirely (not even a connection attempt) rather than connecting tokenless |

@@ -8,6 +8,27 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Added
+- **`list_files` — a path-existence tool for deep mode** (#36).
+  `grep_repo` matches file *content*; its `glob` only narrows which
+  files get searched. Nothing in the palette could answer "does
+  `<path>` exist?", so a model checking for a file content-grepped it
+  and read zero matches as proof of absence — landing false
+  `🚨 Blocker` findings that a fixture "must be added" while the file
+  was tracked and its tests were green on the same SHA. `list_files`
+  returns repo-relative paths at the PR's state, with the same
+  skip-dirs / skip-extensions / binary rules as `grep_repo` so the two
+  agree on what counts as in the repo. Output is capped at 1000 paths
+  and says so when it truncates; a glob matching nothing returns a note
+  spelling out what that does and does not prove. `deep.md` now maps
+  each question to its tool and states plainly that a "file is missing"
+  finding needs path-level evidence. On by default; drop the name from
+  `ReviewerConfig.local_repo_tools` for the previous palette.
+  `GitProvider.list_files`
+  is concrete, not abstract, so existing third-party providers keep
+  working — they inherit a fallback that reports the missing capability
+  rather than implying the file is absent.
+
 ### Changed
 - **Per-run PR comments, collapse instead of edit-forever** (#29). Every
   review used to find-or-edit the same one comment on a PR, so review

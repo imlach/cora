@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
+from cora.core import config as _c
 from cora.core.deep_review import _make_pydantic_ai_local_tools
 
 
@@ -18,7 +19,9 @@ def _get(tools, name):
 
 def test_registered_when_repo_given():
     tools = _make_pydantic_ai_local_tools(None, repo="o/r")
-    assert {t.name for t in tools} == {"grep_repo", "git_show", "read_issue"}
+    assert {t.name for t in tools} == {
+        "grep_repo", "git_show", "list_files", "read_issue",
+    }
 
 
 def test_not_registered_without_a_repo():
@@ -27,15 +30,16 @@ def test_not_registered_without_a_repo():
     `read_issue`, same as grep_repo/git_show still work off the
     checkout alone."""
     tools = _make_pydantic_ai_local_tools(None, repo=None)
-    assert {t.name for t in tools} == {"grep_repo", "git_show"}
+    assert {t.name for t in tools} == {"grep_repo", "git_show", "list_files"}
 
 
 def test_local_issue_tools_override_disables_it():
     class _FakeCfg:
         local_issue_tools = frozenset()
+        local_repo_tools = frozenset(_c.LOCAL_REPO_TOOLS)
 
     tools = _make_pydantic_ai_local_tools(None, repo="o/r", cfg=_FakeCfg())
-    assert {t.name for t in tools} == {"grep_repo", "git_show"}
+    assert {t.name for t in tools} == {"grep_repo", "git_show", "list_files"}
 
 
 def test_calls_local_read_issue_with_review_repo(monkeypatch):

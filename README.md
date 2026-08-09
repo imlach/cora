@@ -75,7 +75,7 @@ engine:
 
 - `RetrievalProvider`: no-op, local BM25/glob, or TEI/Qdrant retrieval.
 - `GitProvider`: read-only repository lookups for `grep_repo` /
-  `git_show`.
+  `list_files` / `git_show`.
 - `Reporter`: side effects such as GitHub comments, check-runs, and
   patch suggestions.
 
