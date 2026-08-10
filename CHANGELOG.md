@@ -9,6 +9,22 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 ## [Unreleased]
 
 ### Fixed
+- **A second bad call to the same MCP tool no longer aborts the review**
+  (#58). Pydantic-AI's per-tool retry budget is cumulative across a run
+  and only clears when that tool succeeds, so with `retries=1` an early
+  recoverable error the model routed around by reaching for a *different*
+  tool left the budget spent — and an unrelated bad argument to the first
+  tool, many turns later, raised
+  `UnexpectedModelBehavior("Tool 'read_note' exceeded max retries count
+  of 1")` and killed the whole loop as `agent-loop-errored`. MCP toolsets
+  now carry `tool_error_behavior='failed'`: the server's error text comes
+  back as a tool result the model reads and corrects from, spending no
+  budget. The request, iteration and wall limits are unchanged and remain
+  the only hard bound; a protocol-level `McpError` still routes through
+  the retry path, and an unreachable server still fails the review with
+  `mcp-connect-failed`. **Requires pydantic-ai 2.16+** (the floor moved
+  with it) — on an older build the factory degrades to the previous
+  behaviour rather than passing a value that build mishandles.
 - The `agent-loop-errored` skip path no longer flattens the reason. The
   check-run and `ReviewResult.terminated_reason` carried the bare marker while
   the specific cause (e.g. `spiral-redraw-exhausted`) survived only in the PR

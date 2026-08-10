@@ -31,6 +31,48 @@ if TYPE_CHECKING:
 SESSION_HEADER = "x-review-session"
 
 
+# How an MCP server's tool errors come back to the model.
+#
+# Pydantic-AI's per-tool retry budget is cumulative across a whole run
+# and only clears when that tool succeeds. Under the default `'retry'`
+# behaviour a recoverable MCP error (wrong identifier type, nonexistent
+# id) spends it — so a first mistake the model routed around by picking
+# a *different* tool leaves the budget at zero, and the next mistake on
+# the same tool raises `UnexpectedModelBehavior` and kills the review
+# mid-flight. Two unrelated bad arguments, one dead review.
+#
+# `'failed'` hands the server's error text back as a
+# `ToolReturnPart(outcome='failed')` and spends no budget: the model
+# reads the error and chooses its next call, the way it already does
+# with a tool that returns an `ERROR: …` string. The request, iteration
+# and wall limits stay the only hard bound on the loop.
+#
+# A protocol-level `McpError` — the transport itself failing rather
+# than a tool rejecting its arguments — is forced back to `'retry'`
+# inside pydantic-ai, so connection failure keeps its own bounded path.
+MCP_TOOL_ERROR_BEHAVIOR = "failed"
+
+
+def mcp_tool_error_behavior() -> str:
+    """`MCP_TOOL_ERROR_BEHAVIOR`, degraded to `'retry'` when the
+    installed pydantic-ai can't express it.
+
+    `'failed'` arrived with `ToolFailed` in pydantic-ai 2.16. An older
+    build accepts the string and then falls through its `'retry'` /
+    `'error'` branches, re-raising the raw `fastmcp.ToolError` out of
+    the toolset — a hard crash on the *first* tool error, which is
+    worse than the defect this replaces. The check isn't redundant with
+    the floor pin in `pyproject.toml`: a deployment can resolve
+    pydantic-ai from a pre-baked runner image rather than from cora's
+    own dependency set.
+    """
+    try:
+        from pydantic_ai.exceptions import ToolFailed  # noqa: F401
+    except ImportError:
+        return "retry"
+    return MCP_TOOL_ERROR_BEHAVIOR
+
+
 def _default_reviewer_config() -> ReviewerConfig:
     """Default-construct a `ReviewerConfig` lazily — the import happens at
     first `Deps()` construction, not at module load, so `cora.core.agent`
@@ -143,6 +185,12 @@ class AgentConfig:
     # Framework retry budget — Pydantic-AI retries failed tool calls
     # up to `retries` times before surfacing the error to the agent.
     # Output-validation retries don't apply here (`output_type=str`).
+    #
+    # It governs the local typed tools and argument-schema failures.
+    # MCP-served tool errors are routed around it entirely — see
+    # `MCP_TOOL_ERROR_BEHAVIOR` — because the budget is cumulative per
+    # tool across the run, which made one early recoverable mistake arm
+    # a later unrelated one to abort the loop.
     retries: int = 1
 
     # Opaque per-review session identifier. When set, every model call
@@ -219,7 +267,10 @@ def make_review_agent(config: AgentConfig, deps_type: type = Deps):
     `MCPToolset(url, headers=...)` toolsets — the framework owns the
     session lifecycle (open on `agent.run`, close on exit). Each
     entry's `auth_headers` flows directly into the toolset's
-    `headers=` kwarg.
+    `headers=` kwarg, and each carries
+    `tool_error_behavior=mcp_tool_error_behavior()` so a recoverable
+    tool error returns control to the model instead of spending the
+    cumulative per-tool retry budget.
 
     Local tools in `config.local_tools` register as Pydantic-AI
     `tools=[...]` — declarations the framework introspects for
@@ -261,10 +312,12 @@ def make_review_agent(config: AgentConfig, deps_type: type = Deps):
         from pydantic_ai.mcp import MCPToolset
 
         allow = config.mcp_allowed_tools
+        tool_error_behavior = mcp_tool_error_behavior()
         for url, headers in config.mcp_servers:
             toolset: Any = MCPToolset(
                 url,
                 headers=headers or None,
+                tool_error_behavior=tool_error_behavior,
             )
             if allow:
                 # `.filtered(...)` returns a wrapping toolset that drops
