@@ -581,6 +581,11 @@ async def deep_review_call(
     )
 
     tool_call_counter: dict[str, int] = {}
+    # Recoverable tool errors per tool — a bad argument the model then
+    # corrected, not a loop-ending failure. Reported next to the call
+    # counts so a review that spent half its turns fighting one tool is
+    # visible without reading the transcript.
+    tool_error_counter: dict[str, int] = {}
     turn_counter: list[int] = [0]
 
     # Loaded tool palette for the comment/footer "unused" denominator.
@@ -741,6 +746,7 @@ async def deep_review_call(
                         pr_number=pr_number,
                         turn_counter=turn_counter,
                         tool_call_counter=tool_call_counter,
+                        tool_error_counter=tool_error_counter,
                         log=gha_log,
                         # Budget.add_tool_call also bumps `iterations`,
                         # which `reason_if_over` uses for the
@@ -791,6 +797,7 @@ async def deep_review_call(
                         terminated_reason="max_iterations",
                         turn_counter=turn_counter,
                         tool_call_counter=tool_call_counter,
+                        tool_error_counter=tool_error_counter,
                         log=gha_log,
                     )
                     # Bare `print` so it lands as a `::warning::` in the
@@ -812,6 +819,7 @@ async def deep_review_call(
                         terminated_reason="per_call_timeout",
                         turn_counter=turn_counter,
                         tool_call_counter=tool_call_counter,
+                        tool_error_counter=tool_error_counter,
                         log=gha_log,
                     )
                     print(
@@ -867,6 +875,7 @@ async def deep_review_call(
                         terminated_reason="wall_time",
                         turn_counter=turn_counter,
                         tool_call_counter=tool_call_counter,
+                        tool_error_counter=tool_error_counter,
                         log=gha_log,
                     )
                     detail = (
@@ -1188,7 +1197,9 @@ async def deep_review_call(
         gha_log(
             f"deep tool-call observability: framework={framework_tool_total} "
             f"event_stream={observed_tool_total} "
-            f"per_tool={tool_call_counter}"
+            f"per_tool={tool_call_counter} "
+            f"tool_errors={sum(tool_error_counter.values())} "
+            f"per_tool_errors={tool_error_counter}"
         )
     except Exception:  # noqa: BLE001
         pass

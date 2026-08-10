@@ -8,6 +8,15 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Added
+- **Recoverable tool errors are counted and logged.** `tool_error` fires
+  per failed tool result or framework retry prompt (with the tool name,
+  the kind, the running count and a truncated message), and
+  `tool_recovered` fires on the first success after them — the pair
+  separates a model that self-corrected from one that never got a tool to
+  work. Totals join the deep finish-line summary and the `wall_hit`
+  break marker as `tool_errors`.
+
 ### Fixed
 - **A second bad call to the same MCP tool no longer aborts the review**
   (#58). Pydantic-AI's per-tool retry budget is cumulative across a run

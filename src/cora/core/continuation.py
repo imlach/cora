@@ -372,6 +372,8 @@ async def continue_on_t1(
     # phase prefix so dashboards can split escalated work from
     # original-tier work.
     tool_call_counter: dict[str, int] = {}
+    # Same recoverable-tool-error counter T0 keeps (deep_review.py).
+    tool_error_counter: dict[str, int] = {}
     turn_counter: list[int] = [0]
 
     # Hoisted to outer scope so the inner wall-hit / iteration-cap
@@ -471,6 +473,7 @@ async def continue_on_t1(
                         pr_number=pr_number,
                         turn_counter=turn_counter,
                         tool_call_counter=tool_call_counter,
+                        tool_error_counter=tool_error_counter,
                         log=gha_log,
                         # Same hook as T0 — `budget.iterations` is the
                         # combined T0+T1 dispatch count after this run.
@@ -516,6 +519,7 @@ async def continue_on_t1(
                         terminated_reason="max_iterations",
                         turn_counter=turn_counter,
                         tool_call_counter=tool_call_counter,
+                        tool_error_counter=tool_error_counter,
                         log=gha_log,
                     )
                     print(f"::warning::T1 continuation hit iteration cap: {exc}")
@@ -534,6 +538,7 @@ async def continue_on_t1(
                         terminated_reason="per_call_timeout",
                         turn_counter=turn_counter,
                         tool_call_counter=tool_call_counter,
+                        tool_error_counter=tool_error_counter,
                         log=gha_log,
                     )
                     print(
@@ -593,6 +598,7 @@ async def continue_on_t1(
                         terminated_reason="wall_time",
                         turn_counter=turn_counter,
                         tool_call_counter=tool_call_counter,
+                        tool_error_counter=tool_error_counter,
                         log=gha_log,
                     )
                     detail = (
