@@ -32,6 +32,22 @@ from cora.review._signals import _TIMEOUT_GUARD
 from cora.review._state import ReviewRun
 
 
+def _agent_loop_verdict_line(terminated_reason: str) -> str:
+    """Verdict line for an `agent-loop-errored` skip, detail included.
+
+    The reason is `agent-loop-errored[: <cause>]`. Flattening it to the
+    bare marker cost a whole triage cycle — the check-run summary showed
+    no cause and the only copy of `spiral-redraw-exhausted` was in the PR
+    skip comment. A reason with no cause keeps the plain line."""
+    _, _, detail = terminated_reason.partition(":")
+    detail = detail.strip()
+    return (
+        f"skipped (agent loop errored: {detail})"
+        if detail
+        else "skipped (agent loop errored)"
+    )
+
+
 def _warn_no_op_escalation(
     *,
     t0_alias: str,
@@ -46,8 +62,8 @@ def _warn_no_op_escalation(
     of the T0 model. Two aliases can resolve to one backend at the
     gateway, which the engine cannot see from the alias strings, so the
     escalation silently becomes a re-draw on the same pods and the review
-    soft-fails with no clue why. Compare the served
-    names as well as the aliases and say so."""
+    soft-fails with no clue why. Compare the served names as well as the
+    aliases and say so."""
     if t1_alias and t1_alias == t0_alias:
         print(
             f"::warning::T1 alias `{t1_alias}` is the same as T0 — the "
@@ -607,16 +623,8 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
     ):
         print(f"::warning::agent loop failed: {run.terminated_reason}")
         # Carry the specific reason onto the check-run, as the
-        # required-tool path above does. Flattening it to the bare
-        # `agent-loop-errored` cost a whole triage cycle: the summary
-        # showed no cause and the only copy of `spiral-redraw-exhausted`
-        # was in the PR skip comment.
-        detail = run.terminated_reason.split(":", 1)[-1].strip()
-        verdict_line = (
-            f"skipped (agent loop errored: {detail})"
-            if detail and detail != run.terminated_reason
-            else "skipped (agent loop errored)"
-        )
+        # required-tool path above does.
+        verdict_line = _agent_loop_verdict_line(run.terminated_reason)
         try:
             run.reporter.post_skip(
                 f"Agent loop errored: `{run.terminated_reason}`. "

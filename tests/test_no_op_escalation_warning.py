@@ -61,3 +61,22 @@ def test_served_model_from_messages_is_last_write_wins():
     assert served_model_from_messages([_Req()]) is None
     assert served_model_from_messages([]) is None
     assert served_model_from_messages(None) is None
+
+
+def test_reason_with_no_detail_keeps_the_plain_verdict_line():
+    """`partition` returns an empty tail when there is no colon, so a
+    bare marker must not render as `errored: `."""
+    from cora.review._tiers import _agent_loop_verdict_line
+
+    assert (
+        _agent_loop_verdict_line("agent-loop-errored")
+        == "skipped (agent loop errored)"
+    )
+    assert (
+        _agent_loop_verdict_line("agent-loop-errored: spiral-redraw-exhausted")
+        == "skipped (agent loop errored: spiral-redraw-exhausted)"
+    )
+    assert (
+        _agent_loop_verdict_line("agent-loop-errored:   ")
+        == "skipped (agent loop errored)"
+    )
