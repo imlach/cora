@@ -620,7 +620,13 @@ def test_deep_spiral_exhausted_killswitch_restores_soft_fail(monkeypatch):
     result = run_review(cfg, reporter=rep, retrieval=NullRetrievalProvider())
 
     assert result.conclusion == "cancelled"
-    assert result.terminated_reason == "agent-loop-errored"
+    assert (
+        result.terminated_reason
+        == "agent-loop-errored: spiral-redraw-exhausted"
+    )
+    assert result.verdict_line == (
+        "skipped (agent loop errored: spiral-redraw-exhausted)"
+    )
     assert any("Agent loop errored" in s for s in rep.skips)
     assert result.tiers_run == ["test-model"]
 
@@ -652,7 +658,13 @@ def test_deep_spiral_exhausted_t1_failure_keeps_soft_fail(monkeypatch):
     result = run_review(cfg, reporter=rep, retrieval=NullRetrievalProvider())
 
     assert result.conclusion == "cancelled"
-    assert result.terminated_reason == "agent-loop-errored"
+    assert (
+        result.terminated_reason
+        == "agent-loop-errored: spiral-redraw-exhausted"
+    )
+    assert result.verdict_line == (
+        "skipped (agent loop errored: spiral-redraw-exhausted)"
+    )
     assert any("Agent loop errored" in s for s in rep.skips)
     assert result.tiers_run == ["test-model", "core"]
 
@@ -684,7 +696,7 @@ def test_deep_other_agent_loop_errors_keep_transient_posture(monkeypatch):
     result = run_review(cfg, reporter=rep, retrieval=NullRetrievalProvider())
 
     assert result.conclusion == "cancelled"
-    assert result.terminated_reason == "agent-loop-errored"
+    assert result.terminated_reason == "agent-loop-errored: RuntimeError('boom')"
     assert result.tiers_run == ["test-model"]
 
 

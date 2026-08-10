@@ -172,11 +172,25 @@ def body_model_from_result(result) -> str | None:
         messages = result.all_messages()
     except Exception:  # noqa: BLE001 — best-effort attribution only
         return None
+    return served_model_from_messages(messages)
+
+
+def served_model_from_messages(messages) -> str | None:
+    """Last non-empty `model_name` across a message list, or `None`.
+
+    Same last-write-wins rule as `body_model_from_result`, but reads a
+    raw history rather than a run result — the tier code holds T0's
+    messages even on paths where the run object never came back (an
+    errored loop), and comparing the served names is the only way to
+    see that two different aliases hit the same pods."""
     model_name: str | None = None
-    for msg in messages:
-        name = getattr(msg, "model_name", None)
-        if isinstance(name, str) and name.strip():
-            model_name = name.strip()
+    try:
+        for msg in messages or ():
+            name = getattr(msg, "model_name", None)
+            if isinstance(name, str) and name.strip():
+                model_name = name.strip()
+    except Exception:  # noqa: BLE001 — best-effort attribution only
+        return None
     return model_name
 
 

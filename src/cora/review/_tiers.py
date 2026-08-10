@@ -32,6 +32,38 @@ from cora.review._signals import _TIMEOUT_GUARD
 from cora.review._state import ReviewRun
 
 
+def _warn_no_op_escalation(
+    *,
+    t0_alias: str,
+    t1_alias: str,
+    t0_served: str | None,
+    t1_served: str | None,
+) -> None:
+    """Warn when T1 ran on the same engine as T0.
+
+    Every escalation entry assumes a second endpoint fails differently —
+    most of all the exhausted-spiral one, where the spiral is a property
+    of the T0 model. Two aliases can resolve to one backend at the
+    gateway, which the engine cannot see from the alias strings, so the
+    escalation silently becomes a re-draw on the same pods and the review
+    soft-fails with no clue why. Compare the served
+    names as well as the aliases and say so."""
+    if t1_alias and t1_alias == t0_alias:
+        print(
+            f"::warning::T1 alias `{t1_alias}` is the same as T0 — the "
+            "escalation cannot fail differently. Set T1_MODEL to another "
+            "model."
+        )
+        return
+    if t0_served and t1_served and t0_served == t1_served:
+        print(
+            f"::warning::T1 alias `{t1_alias}` resolved to the same served "
+            f"model as T0 `{t0_alias}` (`{t1_served}`) — the aliases differ "
+            "but the backend does not, so the escalation was a no-op. Point "
+            "T1_MODEL at a different model."
+        )
+
+
 def _default_policy(
     cfg: ReviewerConfig,
     *,
@@ -489,8 +521,21 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
         # `tiers_run.append` stays here (before dispatch) so the trail
         # records the attempt even when T1 produces no body.
         run.tiers_run.append(t1_tier.model)
+        # T0's served-model name, read off its history: the escalation
+        # only means anything if T1 lands on a different engine, and a
+        # gateway alias can hide that it doesn't.
+        # Taken before dispatch because T1 overwrites the budget chip.
+        from cora.core.litellm_capture import served_model_from_messages
+
+        _t0_served = served_model_from_messages(t0_messages)
         outcome = await run_escalation(
             policy, esc_ctx, _continuation_tier_runner(esc_ctx.extra)
+        )
+        _warn_no_op_escalation(
+            t0_alias=run.model,
+            t1_alias=t1_tier.model,
+            t0_served=_t0_served,
+            t1_served=budget.resolved_model,
         )
         if outcome.body:
             # T1 produced a verdict — adopt it. The connector mapped the
@@ -561,6 +606,17 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
         "agent-loop-errored"
     ):
         print(f"::warning::agent loop failed: {run.terminated_reason}")
+        # Carry the specific reason onto the check-run, as the
+        # required-tool path above does. Flattening it to the bare
+        # `agent-loop-errored` cost a whole triage cycle: the summary
+        # showed no cause and the only copy of `spiral-redraw-exhausted`
+        # was in the PR skip comment.
+        detail = run.terminated_reason.split(":", 1)[-1].strip()
+        verdict_line = (
+            f"skipped (agent loop errored: {detail})"
+            if detail and detail != run.terminated_reason
+            else "skipped (agent loop errored)"
+        )
         try:
             run.reporter.post_skip(
                 f"Agent loop errored: `{run.terminated_reason}`. "
@@ -569,15 +625,15 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
         except Exception as post_exc:  # noqa: BLE001
             print(f"::warning::could not post skip comment: {post_exc}")
         run.reporter.complete_check(
-            verdict_line="skipped (agent loop errored)",
+            verdict_line=verdict_line,
             conclusion="cancelled",
             budget=budget,
             wall_time_s=time.monotonic() - start,
-            terminated_reason="agent-loop-errored",
+            terminated_reason=run.terminated_reason,
         )
         return run.skip_result(
-            "skipped (agent loop errored)",
-            "agent-loop-errored",
+            verdict_line,
+            run.terminated_reason,
             budget=budget,
             wall_time_s=time.monotonic() - start,
             tiers_run=run.tiers_run,

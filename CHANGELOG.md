@@ -8,6 +8,20 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Fixed
+- The `agent-loop-errored` skip path no longer flattens the reason. The
+  check-run and `ReviewResult.terminated_reason` carried the bare marker while
+  the specific cause (e.g. `spiral-redraw-exhausted`) survived only in the PR
+  skip comment, so a soft-failed review looked causeless. Both now carry the
+  full reason, matching the required-tool path. Retry markers still match —
+  consumers test the prefix.
+
+### Added
+- A `::warning::` when a T1 escalation ran on the same engine as T0 — either
+  the same alias, or two aliases the gateway resolves to one served model.
+  Every escalation entry assumes the second endpoint fails differently; when it
+  does not, the escalation is a no-op and used to fail silently.
+
 ## [0.1.9] - 2026-08-09
 
 ### Added
