@@ -67,6 +67,14 @@ enabled.
 See [../SECURITY.md](../SECURITY.md) for the exact trust rules and fork
 PR behavior.
 
+**Bot authors need `REVIEW_TRIGGER_ALLOWED_AUTHORS`.** GitHub App authors
+report an `author_association` of `NONE`, or `CONTRIBUTOR` once they have
+landed a PR — neither is in the default allowed set, so their PRs skip the
+review until a maintainer applies the opt-in label. If your Renovate,
+Dependabot, release or agent Apps should be reviewed automatically, list
+them here. `gh pr view` reports App logins as `app/<slug>`; that is the
+form to use.
+
 ## Retrieval And Context
 
 | Variable | Purpose |
