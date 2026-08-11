@@ -8,6 +8,8 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-08-11
+
 ### Added
 - **Recoverable tool errors are counted and logged.** `tool_error` fires
   per failed tool result or framework retry prompt (with the tool name,
@@ -16,6 +18,10 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   separates a model that self-corrected from one that never got a tool to
   work. Totals join the deep finish-line summary and the `wall_hit`
   break marker as `tool_errors`.
+- A `::warning::` when a T1 escalation ran on the same engine as T0 — either
+  the same alias, or two aliases the gateway resolves to one served model.
+  Every escalation entry assumes the second endpoint fails differently; when it
+  does not, the escalation is a no-op and used to fail silently.
 
 ### Fixed
 - **A second bad call to the same MCP tool no longer aborts the review**
@@ -40,12 +46,6 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   skip comment, so a soft-failed review looked causeless. Both now carry the
   full reason, matching the required-tool path. Retry markers still match —
   consumers test the prefix.
-
-### Added
-- A `::warning::` when a T1 escalation ran on the same engine as T0 — either
-  the same alias, or two aliases the gateway resolves to one served model.
-  Every escalation entry assumes the second endpoint fails differently; when it
-  does not, the escalation is a no-op and used to fail silently.
 
 ## [0.1.9] - 2026-08-09
 
