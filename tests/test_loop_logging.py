@@ -197,3 +197,135 @@ def test_iter_with_turn_logging_soft_fails_on_tool_call_hook():
         )
     )
     assert counter == {"grep_repo": 1}
+
+
+def _request_node(*parts):
+    """A `ModelRequestNode` carrying the given request parts — the shape
+    the framework hands back after a turn's tools have run."""
+    from pydantic_ai._agent_graph import ModelRequestNode
+    from pydantic_ai.messages import ModelRequest
+
+    return ModelRequestNode(request=ModelRequest(parts=list(parts)))
+
+
+def test_iter_with_turn_logging_counts_tool_errors_and_recovery():
+    """A failed tool result emits `tool_error` and bumps the counter; a
+    later success on the same tool emits `tool_recovered` carrying how
+    many errors it closes out.
+
+    Both halves matter: the error count alone can't tell a model that
+    self-corrected from one that never got the tool to work.
+    """
+    from pydantic_ai.messages import ToolReturnPart
+
+    from cora.core.loop_logging import iter_with_turn_logging
+
+    captured: list[str] = []
+    errors: dict[str, int] = {}
+
+    async def fake_agent_run():
+        yield _request_node(
+            ToolReturnPart(
+                tool_name="read_note",
+                content="unknown note id: 4321",
+                tool_call_id="c1",
+                outcome="failed",
+            )
+        )
+        yield _request_node(
+            ToolReturnPart(
+                tool_name="read_note",
+                content="the note body",
+                tool_call_id="c2",
+            )
+        )
+
+    asyncio.run(
+        iter_with_turn_logging(
+            fake_agent_run(),
+            phase="T0",
+            pr_number="1234",
+            turn_counter=[0],
+            tool_call_counter={},
+            tool_error_counter=errors,
+            log=captured.append,
+        )
+    )
+
+    assert errors == {"read_note": 1}
+    error_lines = [ln for ln in captured if "event=tool_error" in ln]
+    assert len(error_lines) == 1
+    assert "name=read_note" in error_lines[0]
+    assert "kind=failed_result" in error_lines[0]
+    assert "errors=1" in error_lines[0]
+    assert "unknown note id" in error_lines[0]
+
+    recovered = [ln for ln in captured if "event=tool_recovered" in ln]
+    assert len(recovered) == 1
+    assert "name=read_note after_errors=1" in recovered[0]
+
+
+def test_iter_with_turn_logging_counts_retry_prompts_as_tool_errors():
+    """A framework `RetryPromptPart` — bad arguments, unknown tool name
+    — is the same class of recoverable error as a failed MCP result and
+    counts alongside it."""
+    from pydantic_ai.messages import RetryPromptPart
+
+    from cora.core.loop_logging import iter_with_turn_logging
+
+    captured: list[str] = []
+    errors: dict[str, int] = {}
+
+    async def fake_agent_run():
+        yield _request_node(
+            RetryPromptPart(
+                tool_name="search_knowledge",
+                content="query is required",
+                tool_call_id="c1",
+            )
+        )
+
+    asyncio.run(
+        iter_with_turn_logging(
+            fake_agent_run(),
+            phase="T0",
+            pr_number="1234",
+            turn_counter=[0],
+            tool_call_counter={},
+            tool_error_counter=errors,
+            log=captured.append,
+        )
+    )
+
+    assert errors == {"search_knowledge": 1}
+    assert any("kind=retry_prompt" in ln for ln in captured)
+    assert not any("event=tool_recovered" in ln for ln in captured)
+
+
+def test_log_wall_hit_reports_tool_errors_when_supplied():
+    """The break marker carries the error total, and omits the field
+    entirely when the caller has no counter to report."""
+    from cora.core.loop_logging import log_wall_hit
+
+    with_errors: list[str] = []
+    log_wall_hit(
+        phase="T0",
+        pr_number="1234",
+        terminated_reason="wall_time",
+        turn_counter=[4],
+        tool_call_counter={"grep_repo": 6},
+        tool_error_counter={"read_note": 2, "grep_repo": 1},
+        log=with_errors.append,
+    )
+    assert "tool_errors=3" in with_errors[0]
+
+    without: list[str] = []
+    log_wall_hit(
+        phase="T0",
+        pr_number="1234",
+        terminated_reason="wall_time",
+        turn_counter=[4],
+        tool_call_counter={"grep_repo": 6},
+        log=without.append,
+    )
+    assert "tool_errors=" not in without[0]

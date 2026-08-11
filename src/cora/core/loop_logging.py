@@ -33,8 +33,20 @@ Events emitted (`event=…` label):
   `thinking_chars > text_chars` + `finish=length` combination is
   the canonical reasoning-budget exhaustion signature for a
   reasoning model.
+- `tool_error` — a tool call came back recoverable-bad: a failed
+  result (an MCP server rejecting the arguments) or a framework
+  retry prompt. Adds `turn=…`, `name=…`, `kind=…`
+  (`failed_result` / `retry_prompt`), `errors=…` (running count for
+  that tool) and a truncated `detail=…`. Not a terminal event —
+  the model reads it and picks its next call.
+- `tool_recovered` — first success on a tool after one or more
+  `tool_error`s. Adds `turn=…`, `name=…`, `after_errors=…`. Read
+  with `tool_error`: errors without recoveries are a tool the model
+  never learned to call, which is a prompt or tool-description
+  problem rather than a flaky server.
 - `wall_hit` — `UsageLimitExceeded` (or future timeout/budget
-  trip). Adds `terminated_reason=…`, `turns=…`, `tool_calls=…`.
+  trip). Adds `terminated_reason=…`, `turns=…`, `tool_calls=…`, and
+  `tool_errors=…` when the caller kept a counter.
 - `spiral_redraw` — a turn hit the completion ceiling without
   committing and the identical payload was re-sent once. Adds
   `turn=…`, `outcome=…` (`recovered` / `spiralled_again` /
@@ -293,6 +305,74 @@ def _emit(
     log(" ".join(parts))
 
 
+def _log_tool_results(
+    request: Any,
+    *,
+    phase: str,
+    pr_number: str,
+    turn: int,
+    log: _LogFn,
+    tool_errors: dict[str, int],
+    open_errors: dict[str, int],
+) -> None:
+    """Emit `tool_error` / `tool_recovered` events for the tool results
+    carried on one `ModelRequest`.
+
+    Two part shapes are a recoverable tool error: a `ToolReturnPart`
+    with `outcome='failed'` (an MCP server error routed back as a
+    result — see `agent.MCP_TOOL_ERROR_BEHAVIOR`) and a
+    `RetryPromptPart` (a framework retry: bad arguments, unknown tool
+    name). Neither ends the run on its own.
+
+    `tool_recovered` fires on the first success after one or more
+    errors on the same tool. The pair is what tells a run that
+    self-corrected apart from one that kept calling a tool it could
+    never use — the second is a prompt or tool-description problem, and
+    without the recovery half both look identical in the error count.
+    """
+    from pydantic_ai.messages import RetryPromptPart, ToolReturnPart
+
+    for part in getattr(request, "parts", None) or []:
+        if isinstance(part, ToolReturnPart):
+            name = getattr(part, "tool_name", None) or "<unknown>"
+            if getattr(part, "outcome", "success") != "failed":
+                opened = open_errors.pop(name, 0)
+                if opened:
+                    _emit(
+                        pr_number=pr_number,
+                        phase=phase,
+                        event="tool_recovered",
+                        log=log,
+                        turn=turn,
+                        name=name,
+                        after_errors=opened,
+                    )
+                continue
+            kind = "failed_result"
+        elif isinstance(part, RetryPromptPart):
+            name = getattr(part, "tool_name", None) or "<unknown>"
+            kind = "retry_prompt"
+        else:
+            continue
+
+        tool_errors[name] = tool_errors.get(name, 0) + 1
+        open_errors[name] = open_errors.get(name, 0) + 1
+        _emit(
+            pr_number=pr_number,
+            phase=phase,
+            event="tool_error",
+            log=log,
+            turn=turn,
+            name=name,
+            kind=kind,
+            errors=tool_errors[name],
+            # Quoted + truncated for the same reason `tool_call` args
+            # are: the server's message is free text and would
+            # otherwise break the logfmt tokeniser.
+            detail=f'"{_truncate_args(getattr(part, "content", None))}"',
+        )
+
+
 async def iter_with_turn_logging(
     agent_run,
     *,
@@ -348,6 +428,12 @@ async def iter_with_turn_logging(
     # delta IS the spiral, caught while it's happening rather than
     # inferred from a corpse.
     thinking_budget_tokens: int = 10_000,
+    # Cumulative recoverable-tool-error counter, keyed by tool name.
+    # Supplied by the reviewer so the finish-line + wall-hit lines can
+    # report it next to `tool_call_counter`; the per-occurrence
+    # `tool_error` / `tool_recovered` events fire either way. None (the
+    # default) keeps triage callers and tests unchanged.
+    tool_error_counter: dict[str, int] | None = None,
 ):
     """Drive `agent_run` node-by-node and emit per-turn log lines.
 
@@ -366,6 +452,10 @@ async def iter_with_turn_logging(
         in the reviewer's deep path)
       - Emit the per-turn `model_response` summary line with the
         thinking/text/tool-calls/tokens breakdown
+
+    Each `ModelRequestNode` carries the *results* of the turn before
+    it, so that branch also walks `request.parts` to emit
+    `tool_error` / `tool_recovered` (see `_log_tool_results`).
 
     Two independent timeouts guard the loop:
 
@@ -403,6 +493,11 @@ async def iter_with_turn_logging(
     )
 
     turn_start: dict[int, float] = {}
+    # Cumulative errors per tool (caller-visible when supplied) and the
+    # subset not yet followed by a success on that tool — the latter is
+    # what `tool_recovered` reports and clears.
+    tool_errors = tool_error_counter if tool_error_counter is not None else {}
+    open_errors: dict[str, int] = {}
     # Manual iteration so we can wrap each `__anext__()` with the
     # per-call timeout. `agent_run.__aiter__()` returns the same
     # iterator `async for` would drive; `StopAsyncIteration` signals
@@ -566,6 +661,18 @@ async def iter_with_turn_logging(
             break
         last_was_model_request = isinstance(node, ModelRequestNode)
         if isinstance(node, ModelRequestNode):
+            # This request carries the tool results for the turn that
+            # just ended, so it reports under that turn number — the
+            # counter is bumped for the new turn further down.
+            _log_tool_results(
+                getattr(node, "request", None),
+                phase=phase,
+                pr_number=pr_number,
+                turn=turn_counter[0],
+                log=log,
+                tool_errors=tool_errors,
+                open_errors=open_errors,
+            )
             # If a refresh on the prior CallToolsNode produced an
             # injection body, splice it onto this ModelRequest's
             # parts NOW — before the framework's `ModelRequestNode.run()`
@@ -785,12 +892,20 @@ def log_wall_hit(
     turn_counter: list[int],
     tool_call_counter: dict[str, int],
     log: _LogFn,
+    tool_error_counter: dict[str, int] | None = None,
 ) -> None:
     """Structured break-marker log on `UsageLimitExceeded` and friends.
     The caller fires a `::warning::` line separately when it wants the
     GHA UI to surface this as an annotation (the GHA UI elevates
-    `::warning::` to top-of-summary; `::notice::` stays inline)."""
+    `::warning::` to top-of-summary; `::notice::` stays inline).
+
+    `tool_error_counter` is the same dict `iter_with_turn_logging`
+    filled; omitting it drops the `tool_errors` field rather than
+    reporting a zero it can't vouch for."""
     total_tools = sum(tool_call_counter.values())
+    total_errors = (
+        sum(tool_error_counter.values()) if tool_error_counter is not None else None
+    )
     _emit(
         pr_number=pr_number,
         phase=phase,
@@ -799,6 +914,7 @@ def log_wall_hit(
         terminated_reason=terminated_reason,
         turns=turn_counter[0],
         tool_calls=total_tools,
+        tool_errors=total_errors,
     )
 
 
