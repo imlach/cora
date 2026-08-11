@@ -184,6 +184,19 @@ jobs:
           # Bearer token for the MCP server (deep mode). Unset → no auth
           # headers are sent.
           MCP_TOKEN: ${{ secrets.CORA_MCP_TOKEN }}
+          # Trust rule for this repo's own automation. Enforcement is
+          # default-on and `allowed_authors` defaults to empty, so an App
+          # author clears the gate only by association — and a bot that
+          # has landed PRs here reports CONTRIBUTOR, which is not in
+          # DEFAULT_ALLOWED_ASSOCIATIONS. Every PR from the maintainer's
+          # agent App therefore skipped its review until someone applied
+          # `cora:approved` by hand, on a repo where that App is the
+          # second-largest author. Not a secret: these are public logins,
+          # so a plain env value is correct here.
+          #
+          # First-party only. A drive-by contributor still needs the
+          # label, and the fork ceiling still applies on top.
+          REVIEW_TRIGGER_ALLOWED_AUTHORS: app/iml-ai-agents
           # Not set here: MCP_ACTIONS_*, WEB_FETCH_GATE_URL,
           # OTEL_EXPORTER_OTLP_ENDPOINT — the engine soft-skips each.
           PYTHONPATH: ${{ steps.agent-venv.outputs.pythonpath }}
