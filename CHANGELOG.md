@@ -8,6 +8,8 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-08-13
+
 ### Fixed
 - **A grounded fresh T1 no longer has its review thrown away** (#65).
   `continue_on_t1`'s clean path set `result` but never `messages`, while
