@@ -127,6 +127,12 @@ def test_continue_on_t1_returns_loaded_tool_palette_on_success():
         tool_calls = 2
 
     class _FakeAgentRun:
+        # Mirrors `AgentRun.all_messages()` — the clean path
+        # snapshots the trajectory for the grounding-contract
+        # check (#65).
+        def all_messages(self):
+            return []
+
         @property
         def result(self):
             return SimpleNamespace(
@@ -249,6 +255,12 @@ def test_continue_on_t1_respects_max_iterations_override():
         total_tokens = 0
 
     class _FakeAgentRun:
+        # Mirrors `AgentRun.all_messages()` — the clean path
+        # snapshots the trajectory for the grounding-contract
+        # check (#65).
+        def all_messages(self):
+            return []
+
         @property
         def result(self):
             return SimpleNamespace(
@@ -356,6 +368,12 @@ def test_continue_on_t1_fresh_start_uses_initial_prompt():
         total_tokens = 0
 
     class _FakeAgentRun:
+        # Mirrors `AgentRun.all_messages()` — the clean path
+        # snapshots the trajectory for the grounding-contract
+        # check (#65).
+        def all_messages(self):
+            return []
+
         @property
         def result(self):
             return SimpleNamespace(
@@ -462,6 +480,12 @@ def test_continue_on_t1_resume_still_uses_continuation_prompt():
         total_tokens = 0
 
     class _FakeAgentRun:
+        # Mirrors `AgentRun.all_messages()` — the clean path
+        # snapshots the trajectory for the grounding-contract
+        # check (#65).
+        def all_messages(self):
+            return []
+
         @property
         def result(self):
             return SimpleNamespace(
@@ -664,6 +688,12 @@ def test_continue_on_t1_reconciles_unprocessed_tool_calls_in_resume_path():
         total_tokens = 0
 
     class _FakeAgentRun:
+        # Mirrors `AgentRun.all_messages()` — the clean path
+        # snapshots the trajectory for the grounding-contract
+        # check (#65).
+        def all_messages(self):
+            return []
+
         @property
         def result(self):
             return SimpleNamespace(output="🟢 done", usage=lambda: _FakeRunUsage())
