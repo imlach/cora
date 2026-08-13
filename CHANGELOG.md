@@ -8,6 +8,8 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-08-13
+
 ### Added
 - **A capped T1 now writes its review instead of dying** (#62). Nothing
   ever reserved a turn for the final answer: `UsageLimits(request_limit=N)`
