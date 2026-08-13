@@ -8,6 +8,21 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Fixed
+- **A grounded fresh T1 no longer has its review thrown away** (#65).
+  `continue_on_t1`'s clean path set `result` but never `messages`, while
+  the success tail judged `require_initial_tool_call` against that same
+  list. A T1 that ran a full, well-grounded review was therefore measured
+  against an empty history: `first_successful_tool_name([])` returned
+  `None`, and the finished body was discarded as
+  `required-tool-unhonored`. One observed run reported that reason beside
+  `tools={'git_show': 2, 'grep_repo': 5, 'read_note': 1}` — the model had
+  grounded eight times. Only fresh T1 starts could reach it, since the
+  contract arms only when `prior_messages` carries no successful call, so
+  it read as a model refusal rather than an engine fault. T0 has always
+  snapshotted the trajectory here; T1 now does too. The zero-call
+  backstop is unchanged and still fails closed.
+
 ## [0.1.11] - 2026-08-13
 
 ### Added

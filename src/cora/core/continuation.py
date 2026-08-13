@@ -609,6 +609,14 @@ async def continue_on_t1(
                     else:
                         await inner_coro
                     result = agent_run.result
+                    # Snapshot the trajectory on the clean path too, not
+                    # just in the handlers below. The grounding-contract
+                    # check in the success tail reads this list; leaving it
+                    # empty meant the check saw no tool call had ever
+                    # succeeded and threw away a finished review as
+                    # `required-tool-unhonored` (#65). T0 has always done
+                    # this — see the same line in `deep_review_call`.
+                    messages = list(agent_run.all_messages())
                 except UsageLimitExceeded as exc:
                     # T1 is the last tier — there is nothing after it to
                     # rescue the run, so a bare return here is the review
