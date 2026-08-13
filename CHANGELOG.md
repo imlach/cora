@@ -8,6 +8,49 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Added
+- **A capped T1 now writes its review instead of dying** (#62). Nothing
+  ever reserved a turn for the final answer: `UsageLimits(request_limit=N)`
+  raises *before* dispatching request N+1, so a model that spent response
+  N on tool calls ended the run with no text at all. Across the tier
+  boundary that was survivable — a capped T0 escalates and the
+  continuation prompt is the elicitation that makes T1 finish — but T1
+  has no tier after it, so its own cap-trip killed the review as
+  `no review produced`. T1 now spends one bounded `tool_choice="none"`
+  turn turning the trajectory it already built into a verdict. Scoped to
+  `max_iterations`: a `wall_time` or `per_call_timeout` exit means the
+  clock ran out, and another model call is exactly what that path cannot
+  afford. Skipped when `require_initial_tool_call` is armed and
+  unsatisfied — with no grounding there is nothing verified to write up.
+  Best-effort throughout: a backend that ignores `tool_choice` leaves the
+  run where it already was, never worse.
+- A machine-readable `external_id` on the verdict check run
+  (`cora:no-body:<reason>`, `cora:skip:<reason>`, `cora:verdict:<reason>`).
+  `conclusion` cannot separate "the reviewer found blockers" from "the
+  reviewer produced nothing" — both are `failure` — which left consumers
+  string-matching the output title. Purely additive: paths that don't set
+  a tag omit the field, and no conclusion changed.
+
+### Fixed
+- **Token usage is recorded on every loop exit, not just the clean one**
+  (#62). The accounting sat in the success tail of `deep_review_call` /
+  `continue_on_t1`, past the `early_terminated_reason` return, so a
+  cap-trip, wall-time, per-call-timeout or errored exit reported
+  `in_tokens=0 out_tokens=0 resolved_model=unknown` beside a plainly
+  populated `tools={...}` — the calls happened and the tokens were spent,
+  they were just never counted. Every exit now accounts, and the spiral
+  re-draw and recovery turns account themselves. Expect previously-zero
+  finish lines to carry real numbers, and T1-rescued reviews to report
+  higher totals than before: they were reporting T1 alone, because T0's
+  usage was dropped by its own early return.
+- A failed T1 on a **fresh** entry no longer reports the synthetic entry
+  marker as its terminal reason (#62). `classifier_large_start` is what
+  `_tiers.py` writes to *select* the skip-T0 path — it never described a
+  termination — so reporting it masked the real, retryable
+  `max_iterations` from any wrapper that retries on typed reasons. Resume
+  entries are unchanged: they still preserve T0's genuine wall-hit, and a
+  failed grounding contract still wins on either entry.
+
 ## [0.1.10] - 2026-08-11
 
 ### Added

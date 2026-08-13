@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from cora.core import config as _c
-from cora.core.budget import resolve_run_usage, usage_tokens
+from cora.core.budget import PydanticAIUsageAdapter, resolve_run_usage
 
 if TYPE_CHECKING:
     from cora.config import ReviewerConfig
@@ -233,14 +233,5 @@ async def _recover_quick(
         return None
 
 
-class _PydanticAIUsageAdapter:
-    """Adapt Pydantic-AI's `RunUsage` shape (`input_tokens` /
-    `output_tokens` / `total_tokens`, with the legacy `request_tokens` /
-    `response_tokens` aliases as fallback) to the OpenAI-shaped object
-    `Budget.add_usage` expects (`prompt_tokens` / `completion_tokens` /
-    `total_tokens`)."""
-
-    def __init__(self, pa_usage):
-        self.prompt_tokens = usage_tokens(pa_usage, "input_tokens", "request_tokens")
-        self.completion_tokens = usage_tokens(pa_usage, "output_tokens", "response_tokens")
-        self.total_tokens = usage_tokens(pa_usage, "total_tokens")
+# One definition, in `budget.py`; this name stays as an alias.
+_PydanticAIUsageAdapter = PydanticAIUsageAdapter

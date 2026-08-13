@@ -18,6 +18,25 @@ import subprocess
 from cora.core.budget import Budget
 from cora.core.config import CHECK_RUN_NAME, DASHBOARD_PATH, GRAFANA_BASE
 
+# Machine-readable outcome tags for the check run's `external_id`.
+#
+# `conclusion` is too coarse to act on: a review that found blockers and a
+# review that produced nothing are both `failure`, so the only thing
+# separating them was the output title, and consumers ended up
+# string-matching "no review produced" to tell them apart (#62). These
+# tags are the stable surface to branch on instead. The reason is appended
+# (`cora:no-body:max_iterations`) so a retry policy can key on the
+# terminal state as well as the class.
+NO_BODY_EXTERNAL_ID = "cora:no-body"
+SKIP_EXTERNAL_ID = "cora:skip"
+VERDICT_EXTERNAL_ID = "cora:verdict"
+
+
+def outcome_external_id(kind: str, terminated_reason: str | None) -> str:
+    """`<kind>[:<reason>]` — the check run's `external_id` value."""
+    reason = (terminated_reason or "").strip()
+    return f"{kind}:{reason}" if reason else kind
+
 
 def _gh_check_api(args: list[str], payload: dict) -> subprocess.CompletedProcess:
     """Run a `gh api` check-runs call, preferring the cora App-minted
@@ -156,10 +175,18 @@ def update_check_run_completed(
     budget: Budget,
     wall_time_s: float,
     terminated_reason: str | None,
+    external_id: str | None = None,
 ) -> None:
     """PATCH the check run into `completed` state with conclusion +
     verdict-bearing title. Title shows up on the PR status dot's
-    hover/click; summary shows in the Checks tab."""
+    hover/click; summary shows in the Checks tab.
+
+    `external_id` is the machine-readable outcome tag (`NO_BODY_EXTERNAL_ID`
+    and friends). `conclusion` alone can't separate "the reviewer found
+    blockers" from "the reviewer produced nothing" — both are `failure` —
+    which left consumers string-matching the output title. Omitted → the
+    field is left off the payload entirely, so nothing changes for the
+    paths that don't set it."""
     grafana_url = _grafana_drilldown_url(pr_number)
     run_url = _workflow_run_url()
     title_bits = ["cora review"]
@@ -188,6 +215,8 @@ def update_check_run_completed(
         "conclusion": conclusion,
         "output": {"title": title, "summary": summary},
     }
+    if external_id:
+        payload["external_id"] = external_id
     try:
         proc = _gh_check_api(
             ["gh", "api", "-X", "PATCH",

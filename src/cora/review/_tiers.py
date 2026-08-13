@@ -18,6 +18,7 @@ from cora.config import ReviewerConfig
 from cora.core import config as _c
 from cora.core import pr_context as _prc
 from cora.core.budget import Budget
+from cora.core.check_run import SKIP_EXTERNAL_ID, outcome_external_id
 from cora.core.log import _gha_log
 from cora.escalation import (
     WALL_HIT_REASONS,
@@ -580,6 +581,9 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
             budget=budget,
             wall_time_s=time.monotonic() - start,
             terminated_reason="mcp-connect-failed",
+            external_id=outcome_external_id(
+                SKIP_EXTERNAL_ID, "mcp-connect-failed"
+            ),
         )
         return run.skip_result(
             "skipped (MCP server unreachable)",
@@ -610,6 +614,9 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
             budget=budget,
             wall_time_s=time.monotonic() - start,
             terminated_reason=run.terminated_reason,
+            external_id=outcome_external_id(
+                SKIP_EXTERNAL_ID, run.terminated_reason
+            ),
         )
         return run.skip_result(
             "skipped (required initial tool call not completed)",
@@ -638,6 +645,9 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
             budget=budget,
             wall_time_s=time.monotonic() - start,
             terminated_reason=run.terminated_reason,
+            external_id=outcome_external_id(
+                SKIP_EXTERNAL_ID, run.terminated_reason
+            ),
         )
         return run.skip_result(
             verdict_line,
@@ -668,6 +678,9 @@ async def dispatch_tiers(run: ReviewRun) -> ReviewResult | None:
             budget=budget,
             wall_time_s=time.monotonic() - start,
             terminated_reason="per_call_timeout",
+            external_id=outcome_external_id(
+                SKIP_EXTERNAL_ID, "per_call_timeout"
+            ),
         )
         return run.skip_result(
             "skipped (inference backend stalled)",

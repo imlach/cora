@@ -12,6 +12,11 @@ import time
 
 from cora.core import config as _c
 from cora.core.budget import Budget
+from cora.core.check_run import (
+    NO_BODY_EXTERNAL_ID,
+    VERDICT_EXTERNAL_ID,
+    outcome_external_id,
+)
 from cora.core.leak import (
     build_leak_retry_messages,
     detect_blocker,
@@ -130,6 +135,7 @@ def _finalize_observability(
     conclusion: str,
     body_for_summary: str,
     leak_flag: bool,
+    external_id: str | None = None,
 ) -> None:
     """Update check run + step summary at the end of any terminal
     path. Soft-fail; the comment post is the primary user-facing
@@ -141,6 +147,7 @@ def _finalize_observability(
         budget=run.budget,
         wall_time_s=run.wall_time_s,
         terminated_reason=run.terminated_reason,
+        external_id=external_id,
     )
     run.reporter.write_summary(
         body=body_for_summary,
@@ -179,6 +186,11 @@ async def produce_output(run: ReviewRun) -> ReviewResult | None:
             conclusion="failure",
             body_for_summary="",
             leak_flag=False,
+            # …but a blocker verdict is also `failure`, so the conclusion
+            # alone cannot tell a consumer which happened. Tag it (#62).
+            external_id=outcome_external_id(
+                NO_BODY_EXTERNAL_ID, terminated_reason
+            ),
         )
         if run.eval_mode:
             # Dump empty body + trace so the harness sees the entry ran
@@ -377,6 +389,11 @@ async def produce_output(run: ReviewRun) -> ReviewResult | None:
             conclusion="failure",
             body_for_summary=final_body,
             leak_flag=True,
+            # Also `failure`, also not a verdict — same reason the no-body
+            # path is tagged. The reason names which of the two it was.
+            external_id=outcome_external_id(
+                NO_BODY_EXTERNAL_ID, "reasoning-leak"
+            ),
         )
         if run.eval_mode:
             # Dump the raw body + a leak-tagged trace so the harness can
@@ -462,6 +479,11 @@ async def produce_output(run: ReviewRun) -> ReviewResult | None:
         conclusion=verdict_to_conclusion(run.verdict),
         body_for_summary=run.body_to_post,
         leak_flag=False,
+        # A real review body reached the PR. This is the tag that makes a
+        # `failure` conclusion mean "the reviewer found blockers".
+        external_id=outcome_external_id(
+            VERDICT_EXTERNAL_ID, run.terminated_reason
+        ),
     )
 
     # Tier-verdict plumbing — emit a `tier_verdict` event per tier that

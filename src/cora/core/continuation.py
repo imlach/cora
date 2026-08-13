@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from cora.providers.git import GitProvider
 
 from cora.core import config as _c
-from cora.core.budget import resolve_run_usage, usage_tokens
+from cora.core.budget import PydanticAIUsageAdapter, account_run_usage
 from cora.core.deep_review import (
     _WALL_TIME_WAIT_FOR_GRACE_S,
     _loaded_tool_names,
@@ -88,6 +88,33 @@ _UNPROCESSED_TOOL_STUB = (
     "[no result — the prior tier hit its time/iteration budget before "
     "this tool call returned. Treat it as unavailable and continue "
     "without it; re-issue the call only if the finding depends on it.]"
+)
+
+# Last-turn elicitation, sent when T1 trips its iteration cap.
+#
+# Nothing in the loop ever reserved a turn for the final answer:
+# `UsageLimits(request_limit=N)` raises *before* dispatching request N+1,
+# so a model that spent response N on tool calls ends the run with no
+# text at all. Across the tier boundary that was survivable — a capped T0
+# escalates and `_CONTINUATION_PROMPT` is the elicitation that makes T1
+# finish. T1 has no tier after it, so its own cap-trip was terminal and
+# the review died with `no review produced` (#62). Worst on the skip-T0
+# entry, which is *selected* for diffs too large to explore inside a cap
+# and so never finished: 7 of 7 in the reference deployment.
+#
+# Sent with `tool_choice="none"` — the model has no calls left, so
+# telling it to keep verifying would waste the turn. The wording leans on
+# that: report what the trajectory supports, and say where the budget ran
+# out rather than asserting anything unchecked.
+FINAL_ANSWER_ELICITATION_PROMPT = (
+    "You have reached the iteration cap. No further tool calls will run — "
+    "any you request now will be discarded. The conversation above is your "
+    "own working state: tool results, verified facts, partial findings. "
+    "**Write the review now from what that state already establishes**, "
+    "then emit the standard `Verdict:` line and review body. Report only "
+    "findings the evidence above supports. Where you ran out of budget "
+    "before checking something, say so plainly instead of asserting a "
+    "conclusion you did not verify."
 )
 
 
@@ -169,6 +196,62 @@ def _reconcile_unprocessed_tool_calls(
         f"(tools: {sorted({getattr(p, 'tool_name', '?') for p in dangling})})"
     )
     return [*prior_messages, ModelRequest(parts=stub_returns)]
+
+
+async def _elicit_final_answer(
+    agent,
+    *,
+    messages: list,
+    deps,
+    model_settings,
+    pr_number: str,
+    log: Callable[[str], None],
+) -> tuple[str, object | None]:
+    """Convert a capped trajectory into a verdict with one tool-free turn.
+
+    Returns `(body, run)` — `("", None)` when the turn produced nothing
+    usable, so the caller keeps its existing cap-trip reason. The run
+    handle comes back so the caller can account its tokens.
+
+    Must be called inside the open `async with agent:` context: the
+    framework still lists the MCP toolsets to build the request even when
+    `tool_choice="none"` forbids calling them.
+
+    Best-effort by construction. A backend that ignores `tool_choice="none"`
+    answers with a tool call, `request_limit=1` trips, and we return empty
+    — exactly what this path produced before, never worse.
+    """
+    from pydantic_ai import UsageLimits
+
+    history = _reconcile_unprocessed_tool_calls(messages, log=log)
+    try:
+        run = await agent.run(
+            FINAL_ANSWER_ELICITATION_PROMPT,
+            message_history=history,
+            deps=deps,
+            model_settings=model_settings,
+            usage_limits=UsageLimits(request_limit=1),
+        )
+    except Exception as exc:  # noqa: BLE001 — elicitation is best-effort
+        log(
+            f"agent_review iter pr_number={pr_number} phase=T1 "
+            f"event=final_answer_elicitation outcome=errored "
+            f"detail=\"{exc!s:.120}\""
+        )
+        return "", None
+    body = run.output if isinstance(run.output, str) else str(run.output)
+    if not body.strip():
+        log(
+            f"agent_review iter pr_number={pr_number} phase=T1 "
+            "event=final_answer_elicitation outcome=empty"
+        )
+        return "", run
+    log(
+        f"agent_review iter pr_number={pr_number} phase=T1 "
+        f"event=final_answer_elicitation outcome=recovered "
+        f"body_chars={len(body)}"
+    )
+    return body, run
 
 
 async def continue_on_t1(
@@ -391,6 +474,23 @@ async def continue_on_t1(
     stream_on = cfg is not None and cfg.stream_detection
     result = None
     messages: list = []
+    # Verdict recovered by the end-of-loop elicitation, if it ran.
+    elicited_body: str = ""
+    # Set when the cap trip left the grounding contract unsatisfied, so
+    # the terminal reason is decided after the agent context has closed.
+    grounding_failed: bool = False
+    # The live run handle, hoisted so every exit — clean, cap-trip,
+    # wall-time, errored — accounts the tokens it burned (#62).
+    agent_run_handle = None
+
+    def _account(run) -> None:
+        account_run_usage(
+            budget,
+            run,
+            log=gha_log,
+            fallback=f"unknown (T1 on {t1_model_alias}, no header or body model)",
+        )
+
     if contract_armed and not tools_available:
         gha_log(
             f"agent_review iter pr_number={pr_number} phase=T1 "
@@ -439,6 +539,7 @@ async def continue_on_t1(
                 ),
                 usage_limits=UsageLimits(request_limit=max_iterations),
             ) as agent_run:
+                agent_run_handle = agent_run
                 if loop_deadline_monotonic is not None:
                     remaining = loop_deadline_monotonic - time.monotonic()
                     # Pre-pad for push-injection extensions — see the
@@ -509,10 +610,11 @@ async def continue_on_t1(
                         await inner_coro
                     result = agent_run.result
                 except UsageLimitExceeded as exc:
-                    # If T1 also hits the cap, we're out of escalation
-                    # tiers for this iteration. Return the same
-                    # `max_iterations` reason — a T2 second opinion
-                    # is a future escalation.
+                    # T1 is the last tier — there is nothing after it to
+                    # rescue the run, so a bare return here is the review
+                    # dying with no verdict. Snapshot the trajectory and
+                    # let the elicitation below spend one tool-free turn
+                    # turning it into a body (#62).
                     log_wall_hit(
                         phase="T1",
                         pr_number=pr_number,
@@ -523,6 +625,10 @@ async def continue_on_t1(
                         log=gha_log,
                     )
                     print(f"::warning::T1 continuation hit iteration cap: {exc}")
+                    try:
+                        messages = list(agent_run.all_messages())
+                    except Exception:  # noqa: BLE001
+                        messages = []
                     # Even on cap-trip, surface the tools T1 actually
                     # fired so the merged finish-line + comment footer
                     # reflect them. Caller union-merges with T0's set.
@@ -681,6 +787,7 @@ async def continue_on_t1(
                             except Exception:  # noqa: BLE001
                                 pass
                         result = redraw
+                        _account(redraw)
                         messages = redraw_messages
                         log_spiral_redraw(
                             phase="T1",
@@ -690,6 +797,70 @@ async def continue_on_t1(
                             log=gha_log,
                             redraw_tool_calls=len(redraw_tools),
                         )
+
+            # Iteration cap tripped with no body. T1 is the last tier, so
+            # spend one tool-free turn eliciting a verdict from the
+            # trajectory it already built — the same job
+            # `_CONTINUATION_PROMPT` does across the T0→T1 boundary, done
+            # within the tier because there is no tier after this one.
+            # Inside `async with agent` so the toolsets are still listable.
+            #
+            # Only `max_iterations`: a `wall_time` or `per_call_timeout`
+            # trip means the clock, not the turn count, ran out, and
+            # another model call is the one thing that path cannot afford.
+            if early_terminated_reason == "max_iterations" and result is None:
+                if contract_armed and not initial_tool_contract_satisfied(
+                    messages, gha_log=gha_log, pr_number=pr_number, phase="T1"
+                ):
+                    # Grounding never happened, so there is no verified
+                    # trajectory to write up. Eliciting here would produce
+                    # exactly the unverified assertion the contract exists
+                    # to reject. Flagged rather than returned: a return
+                    # from inside `async with agent` skips the accounting
+                    # below, and a raising context-exit would land in the
+                    # outer handler and lose the reason.
+                    grounding_failed = True
+                elif not (
+                    loop_deadline_monotonic is None
+                    or time.monotonic() < loop_deadline_monotonic
+                ):
+                    # Turns ran out and so did the clock. One more model
+                    # call is what this path cannot afford.
+                    gha_log(
+                        f"agent_review iter pr_number={pr_number} phase=T1 "
+                        "event=final_answer_elicitation outcome=skipped "
+                        "reason=deadline_passed"
+                    )
+                else:
+                    elicited, elicit_run = await _elicit_final_answer(
+                        agent,
+                        messages=messages,
+                        deps=deps,
+                        model_settings=ModelSettings(
+                            max_tokens=(
+                                cfg.deep_max_output_tokens
+                                if cfg is not None
+                                else _c.DEEP_MAX_OUTPUT_TOKENS
+                            ),
+                            temperature=0.2,
+                            timeout=timeout_s,
+                            # No calls left, so forbid them outright rather
+                            # than burning the turn on one that cannot run.
+                            # Run-level settings beat the agent-level
+                            # `required_initial_tool_call` callable.
+                            tool_choice="none",
+                        ),
+                        pr_number=pr_number,
+                        log=gha_log,
+                    )
+                    account_run_usage(
+                        budget,
+                        elicit_run,
+                        log=gha_log,
+                        fallback=f"unknown (T1 on {t1_model_alias}, no header or body model)",
+                    )
+                    if elicited:
+                        elicited_body = elicited
     except Exception as exc:  # noqa: BLE001
         # See deep_review.py for the rationale — preserve an inner
         # wall-hit reason if one was already set; only treat outer
@@ -697,11 +868,23 @@ async def continue_on_t1(
         # terminated cleanly. `!r` surfaces the class for genuine
         # errors that stringify to nothing (CancelledError etc.).
         if early_terminated_reason is None:
+            _account(agent_run_handle)
             return "", f"agent-loop-errored: {exc!r}", tools_available
         gha_log(
             f"T1 agent context cleanup raised after {early_terminated_reason} "
             f"trip — suppressing: {exc!r}"
         )
+
+    # Account the main loop here, not in the success tail: every return
+    # below is an exit worth counting, and the errored return above
+    # accounts itself. The re-draw and the elicitation are separate runs
+    # and account themselves where they land.
+    _account(agent_run_handle)
+
+    # Grounding never happened, so no body may post — terminal on every
+    # path, exactly as the success tail's own contract check is.
+    if grounding_failed:
+        return "", "required-tool-unhonored", tools_available
 
     # Re-draw exhausted: keep whatever the spiralled turn said rather
     # than dropping T1's contribution. Same salvage rule as T0.
@@ -721,28 +904,16 @@ async def continue_on_t1(
             return salvage, None, tools_available
         return "", "agent-loop-errored: spiral-redraw-exhausted", tools_available
 
+    # A verdict the elicitation recovered posts like any other T1 body:
+    # `None` here lets the connector map the entry tag onto the finish
+    # line, so a skip-T0 review that got this far reads
+    # `t1-classifier-large` instead of dying as "no review produced".
+    # The grounding contract was checked before the elicitation ran.
+    if elicited_body:
+        return elicited_body, None, tools_available
+
     if early_terminated_reason is not None:
         return "", early_terminated_reason, tools_available
-
-    # Best-effort usage accumulation (additive — T0 already counted).
-    try:
-        budget.add_usage(_PydanticAIUsageAdapter(resolve_run_usage(result)))
-    except Exception as exc:  # noqa: BLE001
-        gha_log(f"pydantic-ai usage adapter failed (T1): {exc}")
-
-    from cora.core.litellm_capture import (
-        drain_captured_headers,
-        resolve_backend_attribution,
-    )
-    captured = drain_captured_headers()
-    budget.record_litellm_headers(captured)
-    budget.set_resolved_model(
-        resolve_backend_attribution(
-            captured,
-            result,
-            fallback=f"unknown (T1 on {t1_model_alias}, no header or body model)",
-        )
-    )
 
     body = result.output if isinstance(result.output, str) else str(result.output)
     if contract_armed and not initial_tool_contract_satisfied(
@@ -752,13 +923,5 @@ async def continue_on_t1(
     return body, None, tools_available
 
 
-class _PydanticAIUsageAdapter:
-    """Adapt Pydantic-AI's `RunUsage` shape (`input_tokens` /
-    `output_tokens` / `total_tokens`, with the legacy `request_tokens` /
-    `response_tokens` aliases as fallback) to the OpenAI-shaped object
-    `Budget.add_usage` expects."""
-
-    def __init__(self, pa_usage):
-        self.prompt_tokens = usage_tokens(pa_usage, "input_tokens", "request_tokens")
-        self.completion_tokens = usage_tokens(pa_usage, "output_tokens", "response_tokens")
-        self.total_tokens = usage_tokens(pa_usage, "total_tokens")
+# One definition, in `budget.py`; this name stays as an alias.
+_PydanticAIUsageAdapter = PydanticAIUsageAdapter

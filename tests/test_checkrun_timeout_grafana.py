@@ -179,3 +179,73 @@ def test_checkrun_uses_github_token_when_no_app_token(monkeypatch):
 
     assert len(captured) == 1
     assert captured[0]["gh_token"] == "ghs-default"
+
+
+# ── typed outcome tag (external_id) ──────────────────────────────────
+#
+# `conclusion` cannot separate "the reviewer found blockers" from "the
+# reviewer produced nothing": both are `failure`. That left consumers
+# string-matching the output title to tell them apart (#62). The
+# `external_id` is the stable field to branch on instead.
+
+
+def test_external_id_carried_onto_the_check_run(monkeypatch):
+    """A supplied tag reaches the PATCH payload."""
+    from cora.core.budget import Budget
+    from cora.core.check_run import (
+        NO_BODY_EXTERNAL_ID,
+        outcome_external_id,
+        update_check_run_completed,
+    )
+
+    captured = _capture_patch_payload(monkeypatch)
+    update_check_run_completed(
+        repo="owner/repo",
+        check_id="123",
+        pr_number="4450",
+        verdict_line="no review produced",
+        conclusion="failure",
+        budget=Budget(max_input=0, max_output=0, max_iterations=0),
+        wall_time_s=136.9,
+        terminated_reason="max_iterations",
+        external_id=outcome_external_id(NO_BODY_EXTERNAL_ID, "max_iterations"),
+    )
+
+    assert captured[-1]["payload"]["external_id"] == "cora:no-body:max_iterations"
+
+
+def test_external_id_omitted_when_unset(monkeypatch):
+    """No tag → the key is absent, so nothing changes for callers that
+    don't distinguish themselves from `conclusion` alone."""
+    from cora.core.budget import Budget
+    from cora.core.check_run import update_check_run_completed
+
+    captured = _capture_patch_payload(monkeypatch)
+    update_check_run_completed(
+        repo="owner/repo",
+        check_id="123",
+        pr_number="4450",
+        verdict_line="verdict: approve",
+        conclusion="success",
+        budget=Budget(max_input=0, max_output=0, max_iterations=0),
+        wall_time_s=12.0,
+        terminated_reason=None,
+    )
+
+    assert "external_id" not in captured[-1]["payload"]
+
+
+def test_no_body_and_blocker_verdict_are_distinguishable():
+    """The defect in one assertion: same conclusion, different tag."""
+    from cora.core.check_run import (
+        NO_BODY_EXTERNAL_ID,
+        VERDICT_EXTERNAL_ID,
+        outcome_external_id,
+    )
+
+    no_body = outcome_external_id(NO_BODY_EXTERNAL_ID, "max_iterations")
+    blocker = outcome_external_id(VERDICT_EXTERNAL_ID, None)
+
+    assert no_body != blocker
+    assert no_body.startswith("cora:no-body")
+    assert blocker == "cora:verdict"

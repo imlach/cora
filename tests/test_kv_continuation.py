@@ -235,13 +235,14 @@ def test_fresh_entry_discards_prior_trajectory(monkeypatch):
 
 
 def test_no_t1_body_preserves_t0_reason(monkeypatch):
-    """T1 also fails: the connector returns an empty body and hands back
-    T0's `terminated_reason` so the original wall-hit isn't masked."""
+    """T1 also fails on a *resume* entry: the connector returns an empty
+    body and hands back T0's `terminated_reason` so the original wall-hit
+    isn't masked."""
     t1_kwargs: dict = {}
     extra, _ = _extra(
         monkeypatch,
         t1_kwargs=t1_kwargs,
-        t1_return=("", "wall_time", []),
+        t1_return=("", "max_iterations", []),
     )
     ctx = _ctx(extra, entry="wall_hit", tag="wall_hit",
                terminated_reason="wall_time")
@@ -252,6 +253,63 @@ def test_no_t1_body_preserves_t0_reason(monkeypatch):
     assert out.terminated_reason == "wall_time"   # T0's reason preserved
     assert out.tools == []
     assert out.tier_ran == "core"
+
+
+def test_no_t1_body_on_fresh_entry_surfaces_t1_reason(monkeypatch):
+    """Fresh entry, no body: T1's real reason wins.
+
+    `classifier_large_start` is a marker `_tiers.py` writes to *select*
+    the skip-T0 path — it never described a termination. Reporting it as
+    the terminal reason hid the retryable `max_iterations` that actually
+    ended the run (#62)."""
+    extra, _ = _extra(
+        monkeypatch,
+        t1_kwargs={},
+        t1_return=("", "max_iterations", []),
+    )
+    ctx = _ctx(extra, entry="fresh", tag="classifier_large",
+               terminated_reason="classifier_large_start", prev=[])
+
+    out = asyncio.run(KvContinuationConnector().escalate(ctx, _never))
+
+    assert out.body == ""
+    assert out.terminated_reason == "max_iterations"
+
+
+def test_no_t1_body_on_fresh_entry_falls_back_to_seed_reason(monkeypatch):
+    """A fresh entry whose T1 reported no reason at all keeps the seed
+    marker rather than reporting nothing."""
+    extra, _ = _extra(
+        monkeypatch,
+        t1_kwargs={},
+        t1_return=("", None, []),
+    )
+    ctx = _ctx(extra, entry="fresh", tag="classifier_large",
+               terminated_reason="classifier_large_start", prev=[])
+
+    out = asyncio.run(KvContinuationConnector().escalate(ctx, _never))
+
+    assert out.terminated_reason == "classifier_large_start"
+
+
+def test_failed_grounding_contract_wins_on_either_entry(monkeypatch):
+    """`required-tool-*` is terminal regardless of entry — the finalize
+    path must see it so an unverified body can never post."""
+    for entry, tag, seed in (
+        ("fresh", "classifier_large", "classifier_large_start"),
+        ("wall_hit", "wall_hit", "wall_time"),
+    ):
+        extra, _ = _extra(
+            monkeypatch,
+            t1_kwargs={},
+            t1_return=("", "required-tool-unhonored", []),
+        )
+        ctx = _ctx(extra, entry=entry, tag=tag, terminated_reason=seed,
+                   prev=[] if entry == "fresh" else None)
+
+        out = asyncio.run(KvContinuationConnector().escalate(ctx, _never))
+
+        assert out.terminated_reason == "required-tool-unhonored"
 
 
 def test_generic_tier_runner_threads_deadline(monkeypatch):

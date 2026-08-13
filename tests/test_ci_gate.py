@@ -196,11 +196,26 @@ class RecordingReporter(Reporter):
     def post_in_progress(self) -> None:
         pass
 
-    def complete_check(self, *, verdict_line, conclusion, budget=None, wall_time_s=0.0, terminated_reason=None) -> None:
+    def complete_check(
+        self,
+        *,
+        verdict_line,
+        conclusion,
+        budget=None,
+        wall_time_s=0.0,
+        terminated_reason=None,
+        external_id=None,
+    ) -> None:
         if not self._open:
             return
         self._open = False
-        self.complete_calls.append({"verdict_line": verdict_line, "conclusion": conclusion})
+        self.complete_calls.append(
+            {
+                "verdict_line": verdict_line,
+                "conclusion": conclusion,
+                "external_id": external_id,
+            }
+        )
 
     def write_summary(self, **kwargs) -> None:
         pass

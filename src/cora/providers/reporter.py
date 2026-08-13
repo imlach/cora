@@ -116,12 +116,18 @@ class Reporter(ABC):
         budget: Budget | None = None,
         wall_time_s: float = 0.0,
         terminated_reason: str | None = None,
+        external_id: str | None = None,
     ) -> None:
         """Finalize the verdict check (terminal). Called on an early
         exit (before a full result exists — `budget=None` substitutes a
         zero placeholder) and at review end. Idempotent: the first
         terminal conclusion wins, so a late SIGTERM `timed_out`
-        finalize cannot clobber a real conclusion."""
+        finalize cannot clobber a real conclusion.
+
+        `external_id` is the machine-readable outcome tag
+        (`cora.core.check_run.outcome_external_id`). None leaves the field
+        unset — the right choice for any path `conclusion` alone already
+        describes."""
 
     @abstractmethod
     def write_summary(
@@ -351,6 +357,7 @@ class GitHubReporter(Reporter):
         budget: Budget | None = None,
         wall_time_s: float = 0.0,
         terminated_reason: str | None = None,
+        external_id: str | None = None,
     ) -> None:
         from cora.core.check_run import update_check_run_completed
 
@@ -370,6 +377,7 @@ class GitHubReporter(Reporter):
                 budget=budget if budget is not None else _zero_budget(),
                 wall_time_s=wall_time_s,
                 terminated_reason=terminated_reason,
+                external_id=external_id,
             )
 
     def write_summary(

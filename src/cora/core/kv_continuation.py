@@ -205,14 +205,24 @@ class KvContinuationConnector(EscalationConnector):
                 tools=t1_tools,
                 tier_ran=t1_model,
             )
-        # T1 also failed. Normally preserve the original T0 wall-hit, but a
-        # failed grounding contract is the terminal reason the finalize path
-        # must see so an unverified T0 body can never post.
-        final_reason = (
-            t1_terminated
-            if (t1_terminated or "").startswith("required-tool-")
-            else ctx.terminated_reason
-        )
+        # T1 also failed. Which reason survives depends on the entry:
+        #
+        #   - resume (`wall_hit`): keep T0's. It names a real termination
+        #     the operator should still see, and T1's own trip is the
+        #     second failure of one story.
+        #   - fresh: keep T1's. There is no T0 reason worth protecting —
+        #     `classifier_large_start` is a synthetic marker `_tiers.py`
+        #     writes to *select* this path, never an observed termination.
+        #     Reporting it masked the real, retryable `max_iterations`
+        #     behind a reason no wrapper can act on (#62).
+        #   - a failed grounding contract wins on either entry: the
+        #     finalize path must see it so an unverified body can't post.
+        if (t1_terminated or "").startswith("required-tool-"):
+            final_reason = t1_terminated
+        elif is_fresh:
+            final_reason = t1_terminated or ctx.terminated_reason
+        else:
+            final_reason = ctx.terminated_reason
         gha_log(
             f"T1 continuation produced no body "
             f"(reason: {t1_terminated or 'unknown'}); keeping "

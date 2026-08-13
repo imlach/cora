@@ -195,3 +195,64 @@ def usage_tokens(usage, *names: str) -> int:
         if value:
             return int(value)
     return 0
+
+
+class PydanticAIUsageAdapter:
+    """Adapt Pydantic-AI's `RunUsage` shape (`input_tokens` /
+    `output_tokens` / `total_tokens`, with the legacy `request_tokens` /
+    `response_tokens` aliases as fallback) to the OpenAI-shaped object
+    `Budget.add_usage` expects."""
+
+    def __init__(self, pa_usage):
+        self.prompt_tokens = usage_tokens(pa_usage, "input_tokens", "request_tokens")
+        self.completion_tokens = usage_tokens(
+            pa_usage, "output_tokens", "response_tokens"
+        )
+        self.total_tokens = usage_tokens(pa_usage, "total_tokens")
+
+
+def account_run_usage(budget: Budget, run, *, log, fallback: str) -> None:
+    """Fold one agent run's tokens + backend attribution into `budget`.
+
+    Call on EVERY exit of an agent loop, not only the clean one. This
+    accounting used to sit in the success tail of `deep_review_call` /
+    `continue_on_t1`, *past* the `early_terminated_reason` return — so a
+    cap-trip, wall-time or errored exit reported `in_tokens=0 out_tokens=0
+    resolved_model=unknown` while its `tools={...}` counter was plainly
+    populated. The calls happened and the tokens were spent; they were
+    never counted (#62).
+
+    `run` is either a finished `AgentRunResult` or the live `AgentRun` from
+    `agent.iter()`. Both read the same `GraphAgentState`, so the usage is
+    one object either way and an interrupted loop still accounts what it
+    burned. `None` is a no-op — the agent context never opened.
+
+    Additive by design: each distinct run (main loop, spiral re-draw,
+    final-answer elicitation) accounts once and the totals sum. Attribution
+    is last-write-wins on a *resolved* name only — a caller's `unknown (…)`
+    fallback never overwrites a name an earlier run resolved.
+    """
+    if run is None:
+        return
+    try:
+        budget.add_usage(PydanticAIUsageAdapter(resolve_run_usage(run)))
+    except Exception as exc:  # noqa: BLE001 — accounting must not break a review
+        log(f"pydantic-ai usage adapter failed: {exc}")
+    try:
+        from cora.core.litellm_capture import (
+            drain_captured_headers,
+            resolve_backend_attribution,
+        )
+
+        captured = drain_captured_headers()
+        budget.record_litellm_headers(captured)
+        # Empty `fallback` so an unresolved attempt returns "" instead of
+        # the placeholder — otherwise a later run's "unknown (…)" would
+        # clobber a name an earlier one resolved.
+        resolved = resolve_backend_attribution(captured, run, fallback="")
+        if resolved:
+            budget.set_resolved_model(resolved)
+        elif not budget.resolved_model:
+            budget.set_resolved_model(fallback)
+    except Exception as exc:  # noqa: BLE001
+        log(f"backend attribution failed: {exc}")
