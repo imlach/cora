@@ -61,6 +61,7 @@ class RecordingReporter(Reporter):
         budget=None,
         wall_time_s=0.0,
         terminated_reason=None,
+        external_id=None,
     ) -> None:
         if not self._open:
             return
@@ -72,6 +73,7 @@ class RecordingReporter(Reporter):
                 "budget": budget,
                 "wall_time_s": wall_time_s,
                 "terminated_reason": terminated_reason,
+                "external_id": external_id,
             }
         )
 
@@ -903,6 +905,10 @@ def test_deep_wall_hit_does_not_escalate_when_continuation_off(monkeypatch):
     assert result.verdict is None
     assert result.terminated_reason == "wall_time"
     assert rep.complete_calls[0]["verdict_line"] == "no review produced"
+    # A blocker verdict is also `failure`, so the conclusion alone can't
+    # tell a Checks API consumer which of the two happened (#62). The tag
+    # is the field to branch on; it carries the terminal reason too.
+    assert rep.complete_calls[0]["external_id"] == "cora:no-body:wall_time"
     assert any("no final review" in s for s in rep.skips)
     assert rep.reviews == []
 

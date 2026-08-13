@@ -34,8 +34,9 @@ from typing import TYPE_CHECKING, Any
 
 from cora.core.budget import (
     T0_COLD_START_ALLOWANCE_S,
+    PydanticAIUsageAdapter,
+    account_run_usage,
     resolve_run_usage,
-    usage_tokens,
 )
 
 if TYPE_CHECKING:
@@ -663,6 +664,16 @@ async def deep_review_call(
     stream_on = cfg is not None and cfg.stream_detection
 
     result = None
+    # The live run handle, hoisted so every exit — clean, cap-trip,
+    # wall-time, errored — can account the tokens it burned. Stays None
+    # if the agent context never opened. See `account_run_usage`.
+    agent_run_handle = None
+
+    def _account(run) -> None:
+        account_run_usage(
+            budget, run, log=gha_log, fallback="unknown (no header or body model)"
+        )
+
     try:
         # Open the agent context once so all MCP toolset sessions stay
         # alive for the whole run. `async with agent` is the framework's
@@ -696,6 +707,7 @@ async def deep_review_call(
                 ),
                 usage_limits=UsageLimits(request_limit=max_iterations),
             ) as agent_run:
+                agent_run_handle = agent_run
                 # Outer ceiling — caps the entire iter() at deadline +
                 # small grace. Catches the pathology where a single
                 # LLM/tool call hangs past the in-loop deadline check
@@ -1026,6 +1038,7 @@ async def deep_review_call(
                                 )
                             else:
                                 result = degraded
+                                _account(degraded)
                                 try:
                                     messages = list(degraded.all_messages())
                                 except Exception:  # noqa: BLE001
@@ -1054,6 +1067,7 @@ async def deep_review_call(
                             except Exception:  # noqa: BLE001
                                 pass
                         result = redraw
+                        _account(redraw)
                         messages = redraw_messages
                         log_spiral_redraw(
                             phase="T0",
@@ -1078,11 +1092,18 @@ async def deep_review_call(
         # in early runs). `{exc!r}` also surfaces the class so
         # genuine errors don't render as bare `agent-loop-errored:`.
         if early_terminated_reason is None:
+            _account(agent_run_handle)
             return "", f"agent-loop-errored: {exc!r}", tools_available, messages
         gha_log(
             f"agent context cleanup raised after {early_terminated_reason} "
             f"trip — suppressing: {exc!r}"
         )
+
+    # Account the main loop here, not in the success tail: every return
+    # below this point is an exit worth counting, and the errored return
+    # above accounts itself. Later runs (spiral re-draw / recovery) are
+    # separate `RunUsage` objects and account themselves where they land.
+    _account(agent_run_handle)
 
     # Rung two. A re-draw that was skipped (nothing committed to re-send)
     # or came back empty hands the working state to the bounded
@@ -1137,6 +1158,7 @@ async def deep_review_call(
                     ),
                 )
             result = recovery
+            _account(recovery)
             try:
                 messages = list(recovery.all_messages())
             except Exception:  # noqa: BLE001
@@ -1183,10 +1205,6 @@ async def deep_review_call(
         return "", early_terminated_reason, tools_available, messages
 
     run_usage = resolve_run_usage(result)
-    try:
-        budget.add_usage(_PydanticAIUsageAdapter(run_usage))
-    except Exception as exc:  # noqa: BLE001
-        gha_log(f"pydantic-ai usage adapter failed: {exc}")
 
     # Cross-check the event-stream counter against `RunUsage.tool_calls`
     # — if they diverge it points to events we're missing (output-tool
@@ -1204,18 +1222,6 @@ async def deep_review_call(
     except Exception:  # noqa: BLE001
         pass
 
-    from cora.core.litellm_capture import (
-        drain_captured_headers,
-        resolve_backend_attribution,
-    )
-    captured = drain_captured_headers()
-    budget.record_litellm_headers(captured)
-    budget.set_resolved_model(
-        resolve_backend_attribution(
-            captured, result, fallback="unknown (no header or body model)"
-        )
-    )
-
     body = result.output if isinstance(result.output, str) else str(result.output)
     if contract_armed and not initial_tool_contract_satisfied(
         messages, gha_log=gha_log, pr_number=pr_number, phase="T0"
@@ -1224,18 +1230,7 @@ async def deep_review_call(
     return body, None, tools_available, messages
 
 
-class _PydanticAIUsageAdapter:
-    """Adapt Pydantic-AI's `RunUsage` shape (`input_tokens` /
-    `output_tokens` / `total_tokens`, with the legacy `request_tokens` /
-    `response_tokens` aliases as fallback) to the OpenAI-shaped object
-    `Budget.add_usage` expects (`prompt_tokens` / `completion_tokens` /
-    `total_tokens`).
-
-    Duplicated from `quick_review.py` to keep this module self-
-    contained; the field-name reconciliation now lives in
-    `budget.usage_tokens` so the three copies cannot drift again."""
-
-    def __init__(self, pa_usage):
-        self.prompt_tokens = usage_tokens(pa_usage, "input_tokens", "request_tokens")
-        self.completion_tokens = usage_tokens(pa_usage, "output_tokens", "response_tokens")
-        self.total_tokens = usage_tokens(pa_usage, "total_tokens")
+# The RunUsage → OpenAI-shaped adapter now has one definition, in
+# `budget.py`, alongside the `account_run_usage` helper that every exit
+# path calls. The three former per-module copies are aliases.
+_PydanticAIUsageAdapter = PydanticAIUsageAdapter
