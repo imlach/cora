@@ -32,6 +32,8 @@ for the Anthropic/Bedrock topology.
 | `AGENT_REVIEW_T1_CONTINUATION` | Enables T1 continuation when set to `true` |
 | `T1_MODEL` | Model alias for T1 continuation |
 | `AGENT_REVIEW_T1_MAX_ITERATIONS` | Iteration cap for T1 continuation |
+| `T0_REASONING_EFFORT` | Value sent as the top-level `reasoning_effort` field of T0 model calls. Unset/empty sends no field, so a served reasoning model keeps its engine-side default effort |
+| `T1_REASONING_EFFORT` | Same as `T0_REASONING_EFFORT`, but for the T1 continuation leg — a deployment can run T0 at a cheaper effort while T1 keeps the default |
 | `AGENT_REVIEW_T2_DISAGREEMENT` | Enables second-opinion verdict resolution when set to `true` |
 | `AGENT_REVIEW_T2_MODEL` | Model alias for T2 second opinion |
 | `AGENT_REVIEW_T2_MAX_ITERATIONS` | Iteration cap for T2 second opinion |

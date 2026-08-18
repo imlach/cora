@@ -8,6 +8,17 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Added
+- **Per-tier `reasoning_effort` overrides** (`T0_REASONING_EFFORT`,
+  `T1_REASONING_EFFORT`). The value is sent as the top-level
+  `reasoning_effort` field of the chat-completions body on every
+  model call of that tier (main loop, re-draws, bounded recovery
+  turns). Unset or empty sends no field, so the served model keeps
+  its engine-side default effort. Lets a deployment run T0 (the
+  initial deep review) at a cheaper effort — fewer reasoning tokens
+  per turn — while T1 continuation keeps the default as the
+  verification leg.
+
 ## [0.1.12] - 2026-08-13
 
 ### Fixed

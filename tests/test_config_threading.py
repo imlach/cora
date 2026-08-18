@@ -11,7 +11,12 @@ from cora.config import ReviewerConfig
 from cora.core import config as c
 from cora.core.agent import Deps
 from cora.core.budget import Budget
-from cora.core.deep_review import _thinking_extra_body
+from cora.core.deep_review import (
+    _merge_extra_bodies,
+    _no_thinking_extra_body,
+    _reasoning_effort_extra_body,
+    _thinking_extra_body,
+)
 from cora.core.prompt import load_system_prompt
 from cora.core.retrieval import _cache_get, _cache_put, build_retrieval_query
 
@@ -121,6 +126,63 @@ def test_thinking_extra_body_none_keeps_legacy_env_read(monkeypatch):
     assert _thinking_extra_body(None) == {}
     monkeypatch.setenv("AGENT_REVIEW_ENABLE_THINKING", "true")
     assert _thinking_extra_body(None) != {}
+
+
+# ── Per-tier reasoning effort ────────────────────────────────────────
+
+
+def test_reasoning_effort_extra_body_shape():
+    assert _reasoning_effort_extra_body(None) == {}
+    assert _reasoning_effort_extra_body("") == {}
+    assert _reasoning_effort_extra_body("   ") == {}
+    assert _reasoning_effort_extra_body("low") == {
+        "extra_body": {"reasoning_effort": "low"}
+    }
+    assert _reasoning_effort_extra_body(" xhigh ") == {
+        "extra_body": {"reasoning_effort": "xhigh"}
+    }
+
+
+def test_merge_extra_bodies_combines_payloads():
+    merged = _merge_extra_bodies(
+        _thinking_extra_body(True), _reasoning_effort_extra_body("low")
+    )
+    assert merged == {
+        "extra_body": {
+            "chat_template_kwargs": {"enable_thinking": True},
+            "reasoning_effort": "low",
+        }
+    }
+
+
+def test_merge_extra_bodies_single_body_passthrough():
+    assert _merge_extra_bodies(_thinking_extra_body(True)) == {
+        "extra_body": {"chat_template_kwargs": {"enable_thinking": True}}
+    }
+    assert _merge_extra_bodies(
+        _no_thinking_extra_body(), _reasoning_effort_extra_body("low")
+    ) == {
+        "extra_body": {
+            "chat_template_kwargs": {"enable_thinking": False},
+            "reasoning_effort": "low",
+        }
+    }
+
+
+def test_reasoning_effort_env_folds():
+    cfg = ReviewerConfig.from_env(
+        {"T0_REASONING_EFFORT": "low", "T1_REASONING_EFFORT": "xhigh"}
+    )
+    assert cfg.t0_reasoning_effort == "low"
+    assert cfg.t1_reasoning_effort == "xhigh"
+    # Unset / empty → engine default (None = no field sent).
+    assert ReviewerConfig.from_env({}).t0_reasoning_effort is None
+    assert ReviewerConfig.from_env({}).t1_reasoning_effort is None
+    cfg_empty = ReviewerConfig.from_env(
+        {"T0_REASONING_EFFORT": "", "T1_REASONING_EFFORT": ""}
+    )
+    assert cfg_empty.t0_reasoning_effort is None
+    assert cfg_empty.t1_reasoning_effort is None
 
 
 # ── Prompt path resolution ───────────────────────────────────────────

@@ -98,6 +98,38 @@ def _no_thinking_extra_body() -> dict[str, Any]:
     return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
 
 
+def _reasoning_effort_extra_body(effort: str | None) -> dict[str, Any]:
+    """Per-request `reasoning_effort` override for reasoning models.
+
+    Some served models accept a top-level `reasoning_effort` field in the
+    chat-completions body (vLLM chat templates read it to size their
+    guidance preamble). When unset, send nothing and the served model
+    keeps its engine-side default effort.
+    """
+    if effort is None:
+        return {}
+    effort = str(effort).strip()
+    if not effort:
+        return {}
+    return {"extra_body": {"reasoning_effort": effort}}
+
+
+def _merge_extra_bodies(*bodies: dict[str, Any]) -> dict[str, Any]:
+    """Combine per-request `extra_body` dicts that would clobber each other.
+
+    Spreading two `{"extra_body": {...}}` dicts into one `ModelSettings`
+    call drops the first, so merge the nested payloads into one body.
+    """
+    merged: dict[str, Any] = {}
+    for body in bodies:
+        for key, value in body.items():
+            if key == "extra_body" and isinstance(value, dict):
+                merged.setdefault("extra_body", {}).update(value)
+            else:
+                merged[key] = value
+    return merged
+
+
 def _make_verdict_probe(cfg: ReviewerConfig | None) -> Callable[[str], bool]:
     """`(text) -> bool`: does this response body already carry a
     parseable verdict?
@@ -701,8 +733,13 @@ async def deep_review_call(
                     max_tokens=deep_max_tokens,
                     temperature=0.2,
                     timeout=timeout_s,
-                    **_thinking_extra_body(
-                        cfg.enable_thinking if cfg is not None else None
+                    **_merge_extra_bodies(
+                        _thinking_extra_body(
+                            cfg.enable_thinking if cfg is not None else None
+                        ),
+                        _reasoning_effort_extra_body(
+                            cfg.t0_reasoning_effort if cfg is not None else None
+                        ),
                     ),
                 ),
                 usage_limits=UsageLimits(request_limit=max_iterations),
@@ -967,8 +1004,15 @@ async def deep_review_call(
                                 max_tokens=deep_max_tokens,
                                 temperature=0.2,
                                 timeout=timeout_s,
-                                **_thinking_extra_body(
-                                    cfg.enable_thinking if cfg is not None else None
+                                **_merge_extra_bodies(
+                                    _thinking_extra_body(
+                                        cfg.enable_thinking if cfg is not None else None
+                                    ),
+                                    _reasoning_effort_extra_body(
+                                        cfg.t0_reasoning_effort
+                                        if cfg is not None
+                                        else None
+                                    ),
                                 ),
                             ),
                             # Whatever iteration budget the main loop
@@ -1023,7 +1067,12 @@ async def deep_review_call(
                                         ),
                                         temperature=0.2,
                                         timeout=timeout_s,
-                                        **_no_thinking_extra_body(),
+                                        **_merge_extra_bodies(
+                                            _no_thinking_extra_body(),
+                                            _reasoning_effort_extra_body(
+                                                cfg.t0_reasoning_effort
+                                            ),
+                                        ),
                                     ),
                                     usage_limits=UsageLimits(request_limit=1),
                                 )
@@ -1152,8 +1201,15 @@ async def deep_review_call(
                         max_tokens=cfg.spiral_recovery_max_output_tokens,
                         temperature=0.2,
                         timeout=timeout_s,
-                        **_thinking_extra_body(
-                            cfg.enable_thinking if cfg is not None else None
+                        **_merge_extra_bodies(
+                            _thinking_extra_body(
+                                cfg.enable_thinking if cfg is not None else None
+                            ),
+                            _reasoning_effort_extra_body(
+                                cfg.t0_reasoning_effort
+                                if cfg is not None
+                                else None
+                            ),
                         ),
                     ),
                 )
