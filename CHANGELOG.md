@@ -8,6 +8,8 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-08-18
+
 ### Added
 - **Per-tier `reasoning_effort` overrides** (`T0_REASONING_EFFORT`,
   `T1_REASONING_EFFORT`). The value is sent as the top-level
