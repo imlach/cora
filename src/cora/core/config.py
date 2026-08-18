@@ -372,6 +372,15 @@ POST_HEADROOM_S = 30
 # summary + finish-line callers that report a single "wall budget".
 DEFAULT_WALL_TIME_S = DEFAULT_T0_WALL_TIME_S + DEFAULT_T1_WALL_TIME_S + POST_HEADROOM_S
 
+# Per-tier reasoning-effort overrides — the top-level `reasoning_effort`
+# field of an OpenAI-compatible chat-completions body, which served
+# reasoning models (e.g. vLLM with a reasoning-aware chat template) pick
+# up to size their guidance preamble. None = send no field, so the model
+# keeps its engine-side default effort. Lets a deployment run T0 (initial
+# deep review) at a cheaper effort and T1 (continuation) at the default.
+DEFAULT_T0_REASONING_EFFORT: str | None = None
+DEFAULT_T1_REASONING_EFFORT: str | None = None
+
 # ── Tier escalation (T0 → T1 continuation, T2 second opinion) ──────
 # Engine defaults for the escalation ladder; a deployment's workflow
 # overrides them via env (`AGENT_REVIEW_T1_CONTINUATION=true`, the

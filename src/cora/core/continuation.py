@@ -43,6 +43,8 @@ from cora.core.deep_review import (
     _loaded_tool_names,
     _make_pydantic_ai_local_tools,
     _make_verdict_probe,
+    _merge_extra_bodies,
+    _reasoning_effort_extra_body,
 )
 from cora.core.mcp_probe import probe_mcp_server as _probe_mcp_server
 
@@ -536,6 +538,11 @@ async def continue_on_t1(
                     ),
                     temperature=0.2,
                     timeout=timeout_s,
+                    **_merge_extra_bodies(
+                        _reasoning_effort_extra_body(
+                            cfg.t1_reasoning_effort if cfg is not None else None
+                        ),
+                    ),
                 ),
                 usage_limits=UsageLimits(request_limit=max_iterations),
             ) as agent_run:
@@ -761,6 +768,13 @@ async def continue_on_t1(
                                 ),
                                 temperature=0.2,
                                 timeout=timeout_s,
+                                **_merge_extra_bodies(
+                                    _reasoning_effort_extra_body(
+                                        cfg.t1_reasoning_effort
+                                        if cfg is not None
+                                        else None
+                                    ),
+                                ),
                             ),
                             usage_limits=UsageLimits(
                                 request_limit=max(
@@ -852,6 +866,11 @@ async def continue_on_t1(
                             ),
                             temperature=0.2,
                             timeout=timeout_s,
+                            **_merge_extra_bodies(
+                                _reasoning_effort_extra_body(
+                                    cfg.t1_reasoning_effort if cfg is not None else None
+                                ),
+                            ),
                             # No calls left, so forbid them outright rather
                             # than burning the turn on one that cannot run.
                             # Run-level settings beat the agent-level

@@ -158,6 +158,11 @@ class ReviewerConfig:
     t1_continuation: bool = _c.DEFAULT_T1_CONTINUATION
     t1_model: str = _c.DEFAULT_T1_MODEL
     t1_max_iterations: int = _c.DEFAULT_T1_MAX_ITERATIONS
+    # Per-tier `reasoning_effort` overrides for the model request body
+    # (top-level field, sent via `extra_body`). None → no field, and the
+    # served model keeps its engine-side default effort.
+    t0_reasoning_effort: str | None = _c.DEFAULT_T0_REASONING_EFFORT
+    t1_reasoning_effort: str | None = _c.DEFAULT_T1_REASONING_EFFORT
     # Which result triggers escalate to the next tier when the default
     # ladder has a T1 rung (subset of `cora.escalation.ESCALATE_TRIGGERS`).
     # `wall_hit` alone is the classic continuation; add `blocker` /
@@ -494,6 +499,9 @@ class ReviewerConfig:
             ),
             t1_model=getalias("T1_MODEL", _c.DEFAULT_T1_MODEL),
             t1_max_iterations=t1_max_iterations,
+            # Empty / unset → engine default (None = no field sent).
+            t0_reasoning_effort=get("T0_REASONING_EFFORT", _c.DEFAULT_T0_REASONING_EFFORT),
+            t1_reasoning_effort=get("T1_REASONING_EFFORT", _c.DEFAULT_T1_REASONING_EFFORT),
             t2_disagreement=getbool(
                 "AGENT_REVIEW_T2_DISAGREEMENT", _c.DEFAULT_T2_DISAGREEMENT
             ),
