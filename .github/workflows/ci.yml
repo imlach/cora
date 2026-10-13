@@ -30,7 +30,7 @@ jobs:
           - sdk: openai2
             sdk-deps: 'openai==2.48.0 pydantic-ai-slim[openai,mcp]==2.16.0'
           - sdk: openai3
-            sdk-deps: 'openai==3.19.0 pydantic-ai-slim[openai,mcp]==2.53.0' 
+            sdk-deps: 'openai==3.19.0 pydantic-ai-slim[openai,mcp]==2.53.0'
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
