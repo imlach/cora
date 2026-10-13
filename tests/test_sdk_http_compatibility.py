@@ -25,12 +25,16 @@ def _agent(monkeypatch, handler):
     client = httpx.AsyncClient(
         transport=httpx.MockTransport(handler),
         event_hooks={"response": [litellm_capture._capture_response]},
-        headers={"x-imla-session": "test-session"},
     )
-    monkeypatch.setattr(litellm_capture, "build_capture_client", lambda _headers=None: client)
+    def capture_client(headers=None):
+        client.headers.update(headers or {})
+        return client
+
+    monkeypatch.setattr(litellm_capture, "build_capture_client", capture_client)
     agent = make_review_agent(AgentConfig(
         endpoint_base_url="https://model.test/v1", api_key="test-key",
         model_alias="review", system_prompt="Review the supplied change.",
+        session_id="test-session",
     ))
     return agent, client
 
@@ -53,6 +57,7 @@ def test_real_agent_completion_and_usage(monkeypatch):
             assert budget.output_used == 5
             assert litellm_capture.drain_captured_headers()["x-litellm-model-id"] == "served-model"
             assert requests[0].url.path == "/v1/chat/completions"
+            assert requests[0].headers["x-review-session"] == "test-session"
             assert json.loads(requests[0].content)["model"] == "review"
         finally:
             await client.aclose()
