@@ -19,12 +19,18 @@ concurrency:
 
 jobs:
   test:
-    name: pytest (py${{ matrix.python-version }})
+    name: pytest (py${{ matrix.python-version }}, ${{ matrix.sdk }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.13"]
+        sdk: ["openai2", "openai3"]
+        include:
+          - sdk: openai2
+            sdk-deps: 'openai==2.48.0 pydantic-ai-slim[openai,mcp]==2.16.0'
+          - sdk: openai3
+            sdk-deps: 'openai==3.19.0 pydantic-ai-slim[openai,mcp]==2.53.0'
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
@@ -35,7 +41,7 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install (editable + dev deps)
-        run: pip install -e '.[dev,otel]'
+        run: pip install -e '.[dev,otel]' ${{ matrix.sdk-deps }}
 
       - name: Test
         run: pytest -q
@@ -62,7 +68,10 @@ jobs:
       # ruff is what let 251 findings accumulate against a moving default
       # rule set that no two machines agreed on.
       - name: Install ruff
-        run: pip install -e '.[dev]'
+        run: pip install -e '.[dev]' uv==0.11.28
+
+      - name: Check dependency lock
+        run: uv lock --check
 
       - name: Lint
         run: ruff check --output-format=github .

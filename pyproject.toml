@@ -32,8 +32,10 @@ classifiers = [
 # pins can install the wheel `--no-deps` against its own lockfile.)
 # Floors are the versions cora was developed and tested against.
 dependencies = [
-    "openai>=2.38,<3",
-    "mcp[cli]>=1.27",
+    "openai>=2.38,<4",
+    "mcp[cli]>=1.27,<2",
+    # FastMCP 4 imports MCP 2 symbols; Cora still uses the MCP 1 transport.
+    "fastmcp-slim[client]>=3,<4",
     # 2.16 is the floor for `MCPToolset(tool_error_behavior='failed')`
     # — see `core/agent.MCP_TOOL_ERROR_BEHAVIOR`. cora still imports and
     # runs against an older build (the factory degrades to the framework
