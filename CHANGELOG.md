@@ -8,6 +8,12 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Changed
+- Support OpenAI SDK 3 alongside SDK 2. CI tests both compatible SDK and
+  Pydantic AI dependency sets, including real client requests over an offline
+  HTTP transport. Keep MCP and FastMCP within their compatible major
+  versions until Cora migrates its MCP transport API.
+
 ## [0.1.13] - 2026-08-18
 
 ### Added
