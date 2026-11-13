@@ -281,6 +281,53 @@ def no_progress_tool_repetitions(messages: list) -> int:
     return count
 
 
+def no_progress_evidence_repetitions(messages: list) -> int:
+    """Count whole result turns without novel complete grep evidence."""
+    seen = set()
+    count = 0
+    grounded = False
+    for message in messages:
+        complete_grep = False
+        reset = False
+        for part in getattr(message, "parts", ()) or ():
+            kind = getattr(part, "part_kind", None)
+            if kind == "user-prompt":
+                seen, count, grounded = set(), 0, False
+                reset = True
+            elif kind in {"tool-return", "retry-prompt"}:
+                name = getattr(part, "tool_name", None)
+                content = getattr(part, "content", None)
+                if kind != "tool-return" or getattr(part, "outcome", None) != "success":
+                    reset = True
+                    continue
+                if name != "grep_repo":
+                    reset = True
+                    if name in _READ_TOOLS and content:
+                        grounded = True
+                    continue
+                try:
+                    body = json.loads(content) if isinstance(content, str) else content
+                    matches = body["matches"]
+                    if not isinstance(matches, list) or body.get("truncated", True):
+                        reset = True
+                        continue
+                except (TypeError, ValueError, KeyError):
+                    reset = True
+                    continue
+                complete_grep = True
+                fingerprint = json.dumps(matches, sort_keys=True, default=str)
+                if matches and fingerprint not in seen:
+                    reset = True
+                seen.add(fingerprint)
+                if matches:
+                    grounded = True
+        if reset:
+            count = 0
+        elif complete_grep:
+            count += 1
+    return count if grounded else 0
+
+
 def review_model_settings(ctx, *, require_initial_tool_call: bool = False):
     """Preserve grounding, then conclude when repeated reads add no evidence."""
     from pydantic_ai import ModelSettings
@@ -290,11 +337,14 @@ def review_model_settings(ctx, *, require_initial_tool_call: bool = False):
         return ModelSettings(tool_choice="required", parallel_tool_calls=False)
     cfg = getattr(getattr(ctx, "deps", None), "cfg", None)
     limit = getattr(cfg, "no_progress_tool_limit", 0)
-    if limit > 0 and no_progress_tool_repetitions(messages) >= limit:
+    evidence_limit = getattr(cfg, "no_progress_evidence_limit", 0)
+    exact_trip = limit > 0 and no_progress_tool_repetitions(messages) >= limit
+    evidence_trip = evidence_limit > 0 and no_progress_evidence_repetitions(messages) >= evidence_limit
+    if exact_trip or evidence_trip:
         settings = ModelSettings(tool_choice="none")
         ctx.deps.gha_log(
             f"agent_review iter pr_number={ctx.deps.pr_number} "
-            f"event=no_progress_conclusion repetitions={limit}"
+            f"event=no_progress_conclusion guard={'identical_call' if exact_trip else 'unchanged_evidence'}"
         )
         return settings
     return ModelSettings()

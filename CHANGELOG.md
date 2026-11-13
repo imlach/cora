@@ -13,6 +13,10 @@ versions (e.g. `0.0.0.dev60+g257737d`).
   read-tool calls with unchanged arguments and results. The next request must
   conclude from the existing trajectory. Failed tools and changed evidence do
   not trigger this guard; the initial successful-tool contract still applies.
+- `CORA_NO_PROGRESS_EVIDENCE_LIMIT` bounds whole result turns with no novel
+  complete grep matches, including changed queries. A new match, incomplete
+  result, failed tool, or new context resets the sequence. Prior substantive
+  tool evidence is required, and a batch of parallel probes counts once.
 - `CORA_CONCLUSION_REASONING_EFFORT` sets effort only on bounded terminal T1
   elicitation. Other tier calls retain their configured effort.
 - `CORA_OPENROUTER_PROVIDER_PREFERENCES` adds JSON provider defaults to chat

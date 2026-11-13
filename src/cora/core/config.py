@@ -703,3 +703,4 @@ DASHBOARD_PATH = os.environ.get("GRAFANA_DASHBOARD_PATH", "")
 # Opt-in stop after repeated identical successful read calls and results.
 NO_PROGRESS_TOOL_LIMIT = 0
 CONCLUSION_REASONING_EFFORT: str | None = None
+NO_PROGRESS_EVIDENCE_LIMIT = 0

@@ -146,6 +146,7 @@ class ReviewerConfig:
     spiral_recovery_max_output_tokens: int = _c.SPIRAL_RECOVERY_MAX_OUTPUT_TOKENS
     spiral_recovery_reasoning_char_cap: int = _c.SPIRAL_RECOVERY_REASONING_CHAR_CAP
     openrouter_provider_preferences: dict | None = None
+    no_progress_evidence_limit: int = _c.NO_PROGRESS_EVIDENCE_LIMIT
     no_progress_tool_limit: int = _c.NO_PROGRESS_TOOL_LIMIT
     conclusion_reasoning_effort: str | None = _c.CONCLUSION_REASONING_EFFORT
     max_tool_iterations: int = _c.DEFAULT_MAX_TOOL_ITERATIONS
@@ -458,6 +459,9 @@ class ReviewerConfig:
             session_header=get("AGENT_REVIEW_SESSION_HEADER"),
             loop_guard_bot_login=get("AGENT_REVIEW_LOOP_GUARD_BOT_LOGIN"),
             openrouter_provider_preferences=get_provider_preferences(),
+            no_progress_evidence_limit=getint(
+                "CORA_NO_PROGRESS_EVIDENCE_LIMIT", _c.NO_PROGRESS_EVIDENCE_LIMIT
+            ),
             no_progress_tool_limit=getint(
                 "CORA_NO_PROGRESS_TOOL_LIMIT", _c.NO_PROGRESS_TOOL_LIMIT
             ),

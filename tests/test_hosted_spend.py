@@ -6,7 +6,12 @@ from types import SimpleNamespace as NS
 import httpx
 
 from cora.config import ReviewerConfig
-from cora.core.agent import Deps, no_progress_tool_repetitions, review_model_settings
+from cora.core.agent import (
+    Deps,
+    no_progress_evidence_repetitions,
+    no_progress_tool_repetitions,
+    review_model_settings,
+)
 from cora.core.litellm_capture import (
     build_capture_client,
     drain_billing,
@@ -112,7 +117,7 @@ def test_real_agent_concludes_after_three_identical_reads(monkeypatch):
         return httpx.Response(200, json={
             "id": f"gen-{n}", "object": "chat.completion", "created": 1,
             "model": "test-model", "choices": [{"index": 0, "message": message, "finish_reason": finish}],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 2},
+            "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
         })
 
     def grep_repo(pattern: str) -> str:
@@ -138,3 +143,19 @@ def test_real_agent_concludes_after_three_identical_reads(monkeypatch):
     assert len(bodies) == 4
     assert bodies[0]["tool_choice"] == "required"
     assert bodies[-1]["tool_choice"] == "none"
+
+
+def test_no_novel_evidence_counts_turns_not_parallel_calls():
+    def returned(matches, *, truncated=False):
+        return NS(part_kind="tool-return", tool_name="grep_repo", outcome="success",
+                  content=json.dumps({"matches": matches, "truncated": truncated}))
+    grounded = NS(parts=[returned([{"path": "a.py", "line": 1, "text": "evidence"}])])
+    empty_batch = NS(parts=[returned([]) for _ in range(4)])
+    messages = [grounded, empty_batch]
+    assert no_progress_evidence_repetitions(messages) == 1
+    assert no_progress_evidence_repetitions(messages + [empty_batch] * 2) == 3
+    assert no_progress_evidence_repetitions([empty_batch] * 3) == 0
+    novel = NS(parts=[returned([{"path": "b.py", "line": 2, "text": "new"}])])
+    assert no_progress_evidence_repetitions([*messages, novel]) == 0
+    assert no_progress_evidence_repetitions([*messages, NS(parts=[returned([], truncated=True)])]) == 0
+    assert no_progress_evidence_repetitions([*messages, NS(parts=[NS(part_kind="user-prompt")])]) == 0
