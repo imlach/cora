@@ -7,7 +7,7 @@ name: cora
 #   - `review-deep`   → full agent loop (MCP tools + local
 #                       grep_repo / git_show).
 #   - `review-large`  → deep, but starts directly on T1 (skips T0).
-#   - `review-lite`   → quick-mode on the `review-lite` LiteLLM alias.
+#   - `review-lite`   → quick-mode with the same hosted reviewer.
 #
 # Day-1 minimal wiring: LLM_GATEWAY_KEY, GITHUB_TOKEN, and optionally a
 # cora GitHub App token minted from CORA_APP_ID/CORA_APP_PRIVATE_KEY are
@@ -125,28 +125,28 @@ jobs:
             echo "skip_t0=true" >> "$GITHUB_OUTPUT"
             echo "t1_max_iterations=12" >> "$GITHUB_OUTPUT"
             echo "t1_wall_time_s=1200" >> "$GITHUB_OUTPUT"
-            echo "review_model=review" >> "$GITHUB_OUTPUT"
+            echo "review_model=deepseek/deepseek-v4.1-flash-1017" >> "$GITHUB_OUTPUT"
             echo "Mode: large (skip T0, start on T1, extended budgets)"
           elif [[ "${{ contains(github.event.pull_request.labels.*.name, 'review-deep') }}" == "true" ]]; then
             echo "max_iterations=12" >> "$GITHUB_OUTPUT"
             echo "skip_t0=false" >> "$GITHUB_OUTPUT"
             echo "t1_max_iterations=6" >> "$GITHUB_OUTPUT"
             echo "t1_wall_time_s=600" >> "$GITHUB_OUTPUT"
-            echo "review_model=review" >> "$GITHUB_OUTPUT"
+            echo "review_model=deepseek/deepseek-v4.1-flash-1017" >> "$GITHUB_OUTPUT"
             echo "Mode: deep"
           elif [[ "${{ contains(github.event.pull_request.labels.*.name, 'review-lite') }}" == "true" ]]; then
             echo "max_iterations=0" >> "$GITHUB_OUTPUT"
             echo "skip_t0=false" >> "$GITHUB_OUTPUT"
             echo "t1_max_iterations=6" >> "$GITHUB_OUTPUT"
             echo "t1_wall_time_s=600" >> "$GITHUB_OUTPUT"
-            echo "review_model=review-lite" >> "$GITHUB_OUTPUT"
-            echo "Mode: lite (quick-mode on review-lite alias)"
+            echo "review_model=deepseek/deepseek-v4.1-flash-1017" >> "$GITHUB_OUTPUT"
+            echo "Mode: lite (quick-mode on the hosted reviewer)"
           else
             echo "max_iterations=0" >> "$GITHUB_OUTPUT"
             echo "skip_t0=false" >> "$GITHUB_OUTPUT"
             echo "t1_max_iterations=6" >> "$GITHUB_OUTPUT"
             echo "t1_wall_time_s=600" >> "$GITHUB_OUTPUT"
-            echo "review_model=review" >> "$GITHUB_OUTPUT"
+            echo "review_model=deepseek/deepseek-v4.1-flash-1017" >> "$GITHUB_OUTPUT"
             echo "Mode: quick"
           fi
 
@@ -160,7 +160,7 @@ jobs:
           # Prefer the cora GitHub App for comments/check-runs so the
           # audit actor is cora[bot]; empty falls back to GITHUB_TOKEN.
           CORA_GH_TOKEN: ${{ steps.cora-app-token.outputs.token }}
-          # LiteLLM master key; missing → the engine posts a "skipped:
+          # Gateway PAT; missing → the engine posts a "skipped:
           # secret not configured" comment and exits 0.
           LLM_GATEWAY_KEY: ${{ secrets.LLM_GATEWAY_KEY }}
           # Endpoint URLs are repo *secrets*, not variables: this repo is
@@ -168,18 +168,16 @@ jobs:
           # Unset → engine localhost default (review soft-skips).
           LITELLM_BASE_URL: ${{ secrets.CORA_LLM_BASE_URL }}
           REVIEW_MODEL: ${{ steps.mode.outputs.review_model }}
-          # Optional hosted-inference controls; empty variables preserve engine defaults.
-          CORA_OPENROUTER_PROVIDER_PREFERENCES: ${{ vars.CORA_OPENROUTER_PROVIDER_PREFERENCES }}
+          # Source-controlled DeepSeek profile; generic Qwen effort variables do not apply.
+          T1_MODEL: deepseek/deepseek-v4.1-flash-1017
+          T0_REASONING_EFFORT: "low"
+          T1_REASONING_EFFORT: "max"
+          CORA_CONCLUSION_REASONING_EFFORT: "low"
+          CORA_OPENROUTER_PROVIDER_PREFERENCES: '{"order":["primeintellect","wafer/us"],"only":["primeintellect","wafer/us"],"allow_fallbacks":true,"max_price":{"prompt":0.25,"completion":2}}'
           CORA_NO_PROGRESS_TOOL_LIMIT: ${{ vars.CORA_NO_PROGRESS_TOOL_LIMIT }}
           CORA_NO_PROGRESS_EVIDENCE_LIMIT: ${{ vars.CORA_NO_PROGRESS_EVIDENCE_LIMIT }}
-          CORA_CONCLUSION_REASONING_EFFORT: ${{ vars.CORA_CONCLUSION_REASONING_EFFORT }}
-          T0_REASONING_EFFORT: ${{ vars.CORA_T0_REASONING_EFFORT }}
-          T1_REASONING_EFFORT: ${{ vars.CORA_T1_REASONING_EFFORT }}
-          # The engine's DEFAULT_T1_MODEL ("core") is a retired gateway
-          # alias — left unset, every T1 escalation from this repo 403'd
-          # at the gateway and the review kept whatever T0 had (observed
-          # on #33: T0 spiral-redraw exhausted, T1 forbidden, skipped).
-          T1_MODEL: forte
+          # Hosted endpoints need no paid warmup completion.
+          CORA_PRETRIGGER_WARMUP_MODELS: ""
           MAX_TOOL_ITERATIONS: ${{ steps.mode.outputs.max_iterations }}
           AGENT_REVIEW_SKIP_T0: ${{ steps.mode.outputs.skip_t0 }}
           AGENT_REVIEW_T1_CONTINUATION: "true"
