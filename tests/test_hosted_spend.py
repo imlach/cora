@@ -159,3 +159,21 @@ def test_no_novel_evidence_counts_turns_not_parallel_calls():
     assert no_progress_evidence_repetitions([*messages, novel]) == 0
     assert no_progress_evidence_repetitions([*messages, NS(parts=[returned([], truncated=True)])]) == 0
     assert no_progress_evidence_repetitions([*messages, NS(parts=[NS(part_kind="user-prompt")])]) == 0
+
+
+def test_evidence_guard_uses_real_local_grep_result_schema(tmp_path):
+    from cora.core.repo_tools import local_grep_repo
+
+    (tmp_path / "source.py").write_text("verified needle\n")
+    (tmp_path / "fresh.py").write_text("novel evidence\n")
+    def result(arguments):
+        return NS(parts=[NS(
+            part_kind="tool-return", tool_name="grep_repo", outcome="success",
+            content=local_grep_repo(arguments, root=tmp_path),
+        )])
+    messages = [result({"pattern": "needle"})]
+    messages.extend(result({"pattern": "absent", "glob": scope}) for scope in (
+        "*.py", "source.*", "*",
+    ))
+    assert no_progress_evidence_repetitions(messages) == 3
+    assert no_progress_evidence_repetitions([*messages, result({"pattern": "novel"})]) == 0
