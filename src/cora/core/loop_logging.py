@@ -82,6 +82,7 @@ here).
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import Callable
 from typing import Any
@@ -383,6 +384,9 @@ async def iter_with_turn_logging(
     turn_counter: list[int],
     tool_call_counter: dict[str, int],
     log: _LogFn,
+    caller: str | None = None,
+    repo: str | None = None,
+    session_id: str | None = None,
     on_tool_call: Callable[[str], None] | None = None,
     loop_deadline_monotonic: float | None = None,
     per_call_timeout_s: float | None = None,
@@ -839,6 +843,12 @@ async def iter_with_turn_logging(
                 out_tokens=out_t,
                 finish=finish,
                 elapsed_s=f"{elapsed_f:.1f}",
+                **{
+                    key: json.dumps(value[:256])
+                    for key, value in {
+                        "caller": caller, "repo": repo, "review_session": session_id,
+                    }.items() if value
+                },
                 **drain_billing(
                     getattr(resp, "provider_response_id", None)
                 ),

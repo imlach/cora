@@ -40,6 +40,9 @@ def test_guard_requires_identical_arguments_and_evidence():
     messages = trajectory()
     messages[-1].parts[0].outcome = "failed"
     assert no_progress_tool_repetitions(messages) == 0
+    messages[-1].parts[0].outcome = "success"
+    messages[-1].parts[0].content = "ERROR: invalid glob"
+    assert no_progress_tool_repetitions(messages) == 0
 
 
 def test_guard_opt_in_and_grounding_contract():

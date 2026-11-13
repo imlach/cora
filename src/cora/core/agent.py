@@ -273,6 +273,10 @@ def no_progress_tool_repetitions(messages: list) -> int:
                         or getattr(part, "outcome", None) != "success"):
                     previous, count = None, 0
                     continue
+                content = getattr(part, "content", None)
+                if isinstance(content, str) and content.lstrip().startswith("ERROR:"):
+                    previous, count = None, 0
+                    continue
                 key = (*call, json.dumps(
                     getattr(part, "content", None), sort_keys=True, default=str
                 ))

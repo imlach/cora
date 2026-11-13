@@ -792,6 +792,9 @@ async def deep_review_call(
                 try:
                     inner_coro = iter_with_turn_logging(
                         agent_run,
+                        caller="cora",
+                        repo=repo,
+                        session_id=cfg.session_header if cfg is not None else None,
                         phase="T0",
                         pr_number=pr_number,
                         turn_counter=turn_counter,
