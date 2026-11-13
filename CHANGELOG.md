@@ -8,6 +8,13 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Fixed
+- The single formatting retry now uses configured terminal reasoning effort,
+  provider preferences, and review-session metadata. Its deep-mode output
+  ceiling uses the existing per-call limit rather than the aggregate budget.
+  Empty retry content still fails the review gate and reports only finish and
+  token-count diagnostics.
+
 ### Added
 - Opt-in `CORA_NO_PROGRESS_TOOL_LIMIT` stops a sequence of identical successful
   read-tool calls with unchanged arguments and results. The next request must

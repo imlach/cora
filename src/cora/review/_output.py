@@ -87,6 +87,7 @@ async def quick_review_retry_for_format(
     timeout_s: int,
     pr_number: str,
     max_tokens: int = _c.MAX_OUTPUT_TOKENS,
+    reasoning_effort: str | None = None,
 ) -> tuple[str, str | None]:
     """One follow-up LLM turn after a leak — the model produced analysis
     but missed the verdict marker. Pure REFORMAT of the already-produced
@@ -105,6 +106,7 @@ async def quick_review_retry_for_format(
             temperature=0.1,
             timeout=timeout_s,
             extra_body={
+                **({"reasoning_effort": reasoning_effort} if reasoning_effort else {}),
                 "metadata": {
                     "tags": [
                         f"pr-{pr_number}",
@@ -124,7 +126,13 @@ async def quick_review_retry_for_format(
         budget.add_usage(usage)
     content = (response.choices[0].message.content or "").strip()
     if not content:
-        return "", "empty retry response"
+        finish = str(getattr(response.choices[0], "finish_reason", "unknown"))[:40]
+        details = getattr(usage, "completion_tokens_details", None)
+        return "", (
+            f"empty retry response (finish={finish!r}, "
+            f"output_tokens={getattr(usage, 'completion_tokens', None)}, "
+            f"reasoning_tokens={getattr(details, 'reasoning_tokens', None)})"
+        )
     return content, None
 
 
@@ -255,25 +263,33 @@ async def produce_output(run: ReviewRun) -> ReviewResult | None:
         # construction off the no-leak path.
         from openai import AsyncOpenAI
 
-        llm_client = AsyncOpenAI(
-            api_key=run.api_key, base_url=f"{run.base_url.rstrip('/')}/v1"
-        )
-        retry_body, retry_err = await quick_review_retry_for_format(
-            llm_client=llm_client,
-            model=run.model,
-            leaked_body=final_body,
-            budget=budget,
-            timeout_s=run.per_call_timeout_s,
-            pr_number=pr_number,
-            # Match the first call's ceiling: quick's single-shot cap (a
-            # reasoning model re-thinks even on a reformat turn), deep's
-            # per-call cap otherwise.
-            max_tokens=(
-                cfg.quick_max_output_tokens
-                if mode == "quick"
-                else cfg.max_output_tokens
+        from cora.core.agent import SESSION_HEADER
+        from cora.core.litellm_capture import build_capture_client
+
+        session_id = (cfg.session_header or "").strip()
+        async with AsyncOpenAI(
+            api_key=run.api_key,
+            base_url=f"{run.base_url.rstrip('/')}/v1",
+            http_client=build_capture_client(
+                {SESSION_HEADER: session_id} if session_id else None,
+                provider_preferences=cfg.openrouter_provider_preferences,
             ),
-        )
+        ) as llm_client:
+            retry_body, retry_err = await quick_review_retry_for_format(
+                llm_client=llm_client,
+                model=run.model,
+                leaked_body=final_body,
+                budget=budget,
+                timeout_s=run.per_call_timeout_s,
+                pr_number=pr_number,
+                reasoning_effort=cfg.conclusion_reasoning_effort,
+                # Use the mode's per-call ceiling, not the aggregate budget.
+                max_tokens=(
+                    cfg.quick_max_output_tokens
+                    if mode == "quick"
+                    else cfg.deep_max_output_tokens
+                ),
+            )
         if retry_err:
             _gha_log(f"::warning::leak-retry errored: {retry_err}")
             leak_retry_state = "errored"
