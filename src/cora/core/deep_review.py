@@ -570,6 +570,7 @@ async def deep_review_call(
     mcp_allowed_for_filter = allowed_tools - {"grep_repo", "git_show"}
 
     config = AgentConfig(
+        provider_preferences=cfg.openrouter_provider_preferences if cfg is not None else None,
         endpoint_base_url=endpoint_base_url,
         api_key=llm_gateway_key,
         model_alias=model_alias,
@@ -791,6 +792,9 @@ async def deep_review_call(
                 try:
                     inner_coro = iter_with_turn_logging(
                         agent_run,
+                        caller="cora",
+                        repo=repo,
+                        session_id=cfg.session_header if cfg is not None else None,
                         phase="T0",
                         pr_number=pr_number,
                         turn_counter=turn_counter,

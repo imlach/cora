@@ -19,6 +19,7 @@ catalogued in `cora.review`'s module docstring.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -144,6 +145,10 @@ class ReviewerConfig:
     spiral_recovery: bool = _c.SPIRAL_RECOVERY_ENABLED
     spiral_recovery_max_output_tokens: int = _c.SPIRAL_RECOVERY_MAX_OUTPUT_TOKENS
     spiral_recovery_reasoning_char_cap: int = _c.SPIRAL_RECOVERY_REASONING_CHAR_CAP
+    openrouter_provider_preferences: dict | None = None
+    no_progress_evidence_limit: int = _c.NO_PROGRESS_EVIDENCE_LIMIT
+    no_progress_tool_limit: int = _c.NO_PROGRESS_TOOL_LIMIT
+    conclusion_reasoning_effort: str | None = _c.CONCLUSION_REASONING_EFFORT
     max_tool_iterations: int = _c.DEFAULT_MAX_TOOL_ITERATIONS
     t0_wall_time_s: int = _c.DEFAULT_T0_WALL_TIME_S
     t1_wall_time_s: int = _c.DEFAULT_T1_WALL_TIME_S
@@ -351,6 +356,15 @@ class ReviewerConfig:
             v = e.get(name)
             return v if v not in (None, "") else default
 
+        def get_provider_preferences() -> dict | None:
+            raw = get("CORA_OPENROUTER_PROVIDER_PREFERENCES")
+            if raw is None:
+                return None
+            value = json.loads(raw)
+            if not isinstance(value, dict):
+                raise ValueError("CORA_OPENROUTER_PROVIDER_PREFERENCES must be a JSON object")
+            return value
+
         def getbool(name: str, default: bool) -> bool:
             v = e.get(name)
             return default if v in (None, "") else v.strip().lower() == "true"
@@ -444,6 +458,16 @@ class ReviewerConfig:
             # not an empty one.
             session_header=get("AGENT_REVIEW_SESSION_HEADER"),
             loop_guard_bot_login=get("AGENT_REVIEW_LOOP_GUARD_BOT_LOGIN"),
+            openrouter_provider_preferences=get_provider_preferences(),
+            no_progress_evidence_limit=getint(
+                "CORA_NO_PROGRESS_EVIDENCE_LIMIT", _c.NO_PROGRESS_EVIDENCE_LIMIT
+            ),
+            no_progress_tool_limit=getint(
+                "CORA_NO_PROGRESS_TOOL_LIMIT", _c.NO_PROGRESS_TOOL_LIMIT
+            ),
+            conclusion_reasoning_effort=get(
+                "CORA_CONCLUSION_REASONING_EFFORT", _c.CONCLUSION_REASONING_EFFORT
+            ),
             max_tool_iterations=getint("MAX_TOOL_ITERATIONS", _c.DEFAULT_MAX_TOOL_ITERATIONS),
             # Per-call completion ceiling for the tier (deep) legs. Sized
             # against `per_call_timeout_s`, not against the context window —

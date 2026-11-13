@@ -35,6 +35,8 @@ semantics (final-call backend is the one reported).
 
 from __future__ import annotations
 
+import json
+import math
 import os
 import re
 from urllib.parse import urlparse
@@ -46,6 +48,46 @@ import httpx
 # means no LiteLLM response landed (either the endpoint isn't
 # LiteLLM-fronted, or the call failed before headers came back).
 _captured: dict[str, str] = {}
+_billing: dict[str, dict] = {}
+
+
+def drain_billing(response_id: str | None) -> dict:
+    """Return allowlisted provider-reported metadata for one response."""
+    return _billing.pop(response_id, {})
+
+
+def merge_provider_preferences(defaults: dict, explicit: dict) -> dict:
+    """Keep explicit provider constraints while adding missing defaults."""
+    routing_keys = {"order", "sort", "only", "ignore", "quantizations", "max_price"}
+    if routing_keys.intersection(explicit):
+        return dict(explicit)
+    return {**defaults, **explicit}
+
+
+async def _capture_billing(response: httpx.Response) -> None:
+    if not response.headers.get("content-type", "").startswith("application/json"):
+        return
+    try:
+        await response.aread()
+        body = response.json()
+        response_id = body.get("id")
+        if not isinstance(response_id, str):
+            return
+        usage = body.get("usage") or {}
+        fields = {"generation_id": json.dumps(response_id[:256])}
+        cost = usage.get("cost")
+        if (isinstance(cost, (int, float)) and not isinstance(cost, bool)
+                and math.isfinite(cost) and cost >= 0):
+            fields["cost_usd"] = cost
+        provider = body.get("provider")
+        if isinstance(provider, str):
+            fields["billing_provider"] = json.dumps(provider[:100])
+        _billing[response_id] = fields
+        while len(_billing) > 256:
+            _billing.pop(next(iter(_billing)))
+    except (ValueError, TypeError, AttributeError):
+        pass
+
 
 
 # LiteLLM doesn't emit a `x-litellm-model-name` header — only
@@ -87,6 +129,8 @@ async def _capture_response(response: httpx.Response) -> None:
 
 def build_capture_client(
     default_headers: dict[str, str] | None = None,
+    provider_preferences: dict | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> httpx.AsyncClient:
     """Build the `httpx.AsyncClient` to thread into `OpenAIProvider`.
 
@@ -101,9 +145,26 @@ def build_capture_client(
     ones the framework issues internally. Empty/None sends nothing, so
     an unconfigured deployment's requests are byte-identical to before.
     """
-    return httpx.AsyncClient(
-        event_hooks={"response": [_capture_response]},
+    class ProviderDefaultsClient(httpx.AsyncClient):
+        async def send(self, request: httpx.Request, *args, **kwargs):
+            if (provider_preferences and request.method == "POST"
+                    and request.url.path.endswith("/chat/completions")):
+                body = json.loads(await request.aread())
+                explicit = body.get("provider", {})
+                if isinstance(explicit, dict):
+                    body["provider"] = merge_provider_preferences(provider_preferences, explicit)
+                    headers = dict(request.headers)
+                    headers.pop("content-length", None)
+                    request = httpx.Request(
+                        request.method, request.url, headers=headers,
+                        json=body, extensions=request.extensions,
+                    )
+            return await super().send(request, *args, **kwargs)
+
+    return ProviderDefaultsClient(
+        event_hooks={"response": [_capture_response, _capture_billing]},
         headers=default_headers or None,
+        transport=transport,
     )
 
 

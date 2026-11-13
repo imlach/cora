@@ -168,6 +168,13 @@ jobs:
           # Unset → engine localhost default (review soft-skips).
           LITELLM_BASE_URL: ${{ secrets.CORA_LLM_BASE_URL }}
           REVIEW_MODEL: ${{ steps.mode.outputs.review_model }}
+          # Optional hosted-inference controls; empty variables preserve engine defaults.
+          CORA_OPENROUTER_PROVIDER_PREFERENCES: ${{ vars.CORA_OPENROUTER_PROVIDER_PREFERENCES }}
+          CORA_NO_PROGRESS_TOOL_LIMIT: ${{ vars.CORA_NO_PROGRESS_TOOL_LIMIT }}
+          CORA_NO_PROGRESS_EVIDENCE_LIMIT: ${{ vars.CORA_NO_PROGRESS_EVIDENCE_LIMIT }}
+          CORA_CONCLUSION_REASONING_EFFORT: ${{ vars.CORA_CONCLUSION_REASONING_EFFORT }}
+          T0_REASONING_EFFORT: ${{ vars.CORA_T0_REASONING_EFFORT }}
+          T1_REASONING_EFFORT: ${{ vars.CORA_T1_REASONING_EFFORT }}
           # The engine's DEFAULT_T1_MODEL ("core") is a retired gateway
           # alias — left unset, every T1 escalation from this repo 403'd
           # at the gateway and the review kept whatever T0 had (observed
