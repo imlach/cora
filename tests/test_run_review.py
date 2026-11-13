@@ -1128,3 +1128,38 @@ def test_trigger_comment_only_forces_quick_and_suppresses_patch(monkeypatch):
     assert result.verdict == "minor"
     assert "propose_patch" not in result.body
     assert rep.dispatches == []
+
+
+def test_deep_format_retry_uses_terminal_settings_and_per_call_cap(monkeypatch):
+    _patch_common(monkeypatch)
+    import cora.core.deep_review as deep_mod
+    import cora.core.litellm_capture as capture_mod
+
+    captured = {}
+    build_client = capture_mod.build_capture_client
+
+    def configured_client(default_headers=None, **kwargs):
+        captured["headers"] = default_headers
+        captured["provider"] = kwargs.get("provider_preferences")
+        return build_client(default_headers, **kwargs)
+
+    async def fake_deep(**kwargs):
+        return "A finding without a marker.", None, [], []
+
+    async def fake_retry(**kwargs):
+        captured["retry"] = kwargs
+        return "🟡 minor\nA bounded finding.", None
+
+    monkeypatch.setattr(deep_mod, "deep_review_call", fake_deep)
+    monkeypatch.setattr(output_mod, "quick_review_retry_for_format", fake_retry)
+    monkeypatch.setattr(capture_mod, "build_capture_client", configured_client)
+    cfg = _cfg(max_tool_iterations=12, max_output_tokens=800,
+               deep_max_output_tokens=18000, conclusion_reasoning_effort="low",
+               openrouter_provider_preferences={"order": ["example"]},
+               session_header="test-session")
+    result = run_review(cfg, reporter=RecordingReporter(), retrieval=NullRetrievalProvider())
+    assert result.verdict == "minor"
+    assert captured["retry"]["max_tokens"] == 18000
+    assert captured["retry"]["reasoning_effort"] == "low"
+    assert captured["provider"] == {"order": ["example"]}
+    assert captured["headers"] == {"x-review-session": "test-session"}
