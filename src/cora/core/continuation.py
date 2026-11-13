@@ -226,6 +226,12 @@ async def _elicit_final_answer(
     from pydantic_ai import UsageLimits
 
     history = _reconcile_unprocessed_tool_calls(messages, log=log)
+    effort = getattr(getattr(deps, "cfg", None), "conclusion_reasoning_effort", None)
+    if effort:
+        model_settings = dict(model_settings or {})
+        model_settings["extra_body"] = {
+            **model_settings.get("extra_body", {}), "reasoning_effort": effort,
+        }
     try:
         run = await agent.run(
             FINAL_ANSWER_ELICITATION_PROMPT,
@@ -399,6 +405,7 @@ async def continue_on_t1(
         and first_successful_tool_name(prior_messages) is None
     )
     config = AgentConfig(
+        provider_preferences=cfg.openrouter_provider_preferences if cfg is not None else None,
         endpoint_base_url=endpoint_base_url,
         api_key=llm_gateway_key,
         model_alias=t1_model_alias,

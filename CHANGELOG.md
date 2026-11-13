@@ -8,6 +8,20 @@ versions (e.g. `0.0.0.dev60+g257737d`).
 
 ## [Unreleased]
 
+### Added
+- Opt-in `CORA_NO_PROGRESS_TOOL_LIMIT` stops a sequence of identical successful
+  read-tool calls with unchanged arguments and results. The next request must
+  conclude from the existing trajectory. Failed tools and changed evidence do
+  not trigger this guard; the initial successful-tool contract still applies.
+- `CORA_CONCLUSION_REASONING_EFFORT` sets effort only on bounded terminal T1
+  elicitation. Other tier calls retain their configured effort.
+- `CORA_OPENROUTER_PROVIDER_PREFERENCES` adds JSON provider defaults to chat
+  requests. Explicit request fields retain precedence, including privacy and
+  provider constraints.
+- Non-streaming model-response logs include allowlisted provider-reported
+  `cost_usd`, `billing_provider`, and `generation_id` when present. Unknown
+  cost stays absent, not zero; streaming billing capture is not yet supported.
+
 ### Changed
 - Support OpenAI SDK 3 alongside SDK 2. CI tests both compatible SDK and
   Pydantic AI dependency sets, including real client requests over an offline

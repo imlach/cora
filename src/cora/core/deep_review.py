@@ -570,6 +570,7 @@ async def deep_review_call(
     mcp_allowed_for_filter = allowed_tools - {"grep_repo", "git_show"}
 
     config = AgentConfig(
+        provider_preferences=cfg.openrouter_provider_preferences if cfg is not None else None,
         endpoint_base_url=endpoint_base_url,
         api_key=llm_gateway_key,
         model_alias=model_alias,

@@ -17,8 +17,10 @@ code doesn't know or care.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -208,6 +210,7 @@ class AgentConfig:
     # in the current trajectory, each model request is constrained to one
     # required tool call. Off by default for backwards compatibility.
     require_initial_tool_call: bool = False
+    provider_preferences: dict | None = None
 
 
 def first_successful_tool_name(messages: list) -> str | None:
@@ -234,6 +237,67 @@ def required_initial_tool_model_settings(ctx):
     if first_successful_tool_name(list(ctx.messages)) is not None:
         return ModelSettings()
     return ModelSettings(tool_choice="required", parallel_tool_calls=False)
+
+
+_READ_TOOLS = frozenset({
+    "grep_repo", "git_show", "list_files", "git_log", "read_issue",
+    "read_note", "read_decision", "read_agents_section", "search_knowledge",
+    "search_cluster_docs", "web_fetch_doc",
+})
+
+
+def no_progress_tool_repetitions(messages: list) -> int:
+    """Count trailing identical successful read calls, including args/results."""
+    calls = {}
+    previous = None
+    count = 0
+    for message in messages:
+        for part in getattr(message, "parts", ()) or ():
+            kind = getattr(part, "part_kind", None)
+            if kind == "tool-call":
+                args = getattr(part, "args", None)
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except ValueError:
+                        pass
+                calls[getattr(part, "tool_call_id", None)] = (
+                    getattr(part, "tool_name", None),
+                    json.dumps(args, sort_keys=True, default=str),
+                )
+            elif kind == "user-prompt":
+                previous, count = None, 0
+            elif kind in {"tool-return", "retry-prompt"}:
+                call = calls.get(getattr(part, "tool_call_id", None))
+                if (kind != "tool-return" or not call or call[0] not in _READ_TOOLS
+                        or getattr(part, "outcome", None) != "success"):
+                    previous, count = None, 0
+                    continue
+                key = (*call, json.dumps(
+                    getattr(part, "content", None), sort_keys=True, default=str
+                ))
+                count = count + 1 if key == previous else 1
+                previous = key
+    return count
+
+
+def review_model_settings(ctx, *, require_initial_tool_call: bool = False):
+    """Preserve grounding, then conclude when repeated reads add no evidence."""
+    from pydantic_ai import ModelSettings
+
+    messages = list(ctx.messages)
+    if require_initial_tool_call and first_successful_tool_name(messages) is None:
+        return ModelSettings(tool_choice="required", parallel_tool_calls=False)
+    cfg = getattr(getattr(ctx, "deps", None), "cfg", None)
+    limit = getattr(cfg, "no_progress_tool_limit", 0)
+    if limit > 0 and no_progress_tool_repetitions(messages) >= limit:
+        settings = ModelSettings(tool_choice="none")
+        ctx.deps.gha_log(
+            f"agent_review iter pr_number={ctx.deps.pr_number} "
+            f"event=no_progress_conclusion repetitions={limit}"
+        )
+        return settings
+    return ModelSettings()
 
 
 def initial_tool_contract_satisfied(
@@ -299,7 +363,9 @@ def make_review_agent(config: AgentConfig, deps_type: type = Deps):
         base_url=config.endpoint_base_url,
         api_key=config.api_key,
         http_client=build_capture_client(
-            {SESSION_HEADER: session_id} if session_id else None
+            {SESSION_HEADER: session_id} if session_id else None,
+            **({"provider_preferences": config.provider_preferences}
+               if config.provider_preferences is not None else {}),
         ),
     )
     model = OpenAIChatModel(config.model_alias, provider=provider)
@@ -337,9 +403,10 @@ def make_review_agent(config: AgentConfig, deps_type: type = Deps):
         output_type=str,
         retries=config.retries,
         model_settings=(
-            required_initial_tool_model_settings
-            if config.require_initial_tool_call
-            else None
+            partial(
+                review_model_settings,
+                require_initial_tool_call=config.require_initial_tool_call,
+            )
         ),
         tools=tuple(config.local_tools),
         toolsets=toolsets or None,

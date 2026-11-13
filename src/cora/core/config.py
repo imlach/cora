@@ -699,3 +699,7 @@ GRAFANA_BASE = os.environ.get("GRAFANA_BASE_URL", "").rstrip("/")
 # (e.g. "/d/pr-review-detail"). Empty by default — with no path (or no
 # host) the reporter simply omits the drilldown link.
 DASHBOARD_PATH = os.environ.get("GRAFANA_DASHBOARD_PATH", "")
+
+# Opt-in stop after repeated identical successful read calls and results.
+NO_PROGRESS_TOOL_LIMIT = 0
+CONCLUSION_REASONING_EFFORT: str | None = None

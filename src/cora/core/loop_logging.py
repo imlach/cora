@@ -86,6 +86,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from cora.core.litellm_capture import drain_billing
+
 # `(line: str) -> None` — written by the caller's combined-emit
 # wrapper that prints to GHA + pushes to Loki.
 _LogFn = Callable[[str], None]
@@ -837,6 +839,9 @@ async def iter_with_turn_logging(
                 out_tokens=out_t,
                 finish=finish,
                 elapsed_s=f"{elapsed_f:.1f}",
+                **drain_billing(
+                    getattr(resp, "provider_response_id", None)
+                ),
             )
 
             # Uncommitted draw — the turn burned its completion ceiling
